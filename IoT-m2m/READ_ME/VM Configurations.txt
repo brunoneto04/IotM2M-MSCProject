@@ -1,0 +1,41 @@
+[UPDATE UBUNTU and INSTALL GUEST ADDITIONS]
+sudo apt update
+sudo apt upgrade
+sudo apt install build-essential dkms linux-headers-$(uname -r)
+
+lsblk | grep "rom"
+[Guest additions ROM - Open terminal here]
+sudo ./VBoxLinuxAdditions.run
+
+
+[INSTALL GIT] 
+sudo apt install git
+[No repositório local]
+git init
+
+git config --global user.email "tiagomes_23@hotmail.com"
+git config --global user.name "TiagoAMGomes"
+
+[github token: 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]
+git remote add origin https://github.com/TiagoAMGomes/iotm2m.git
+git remote set-url origin https://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@github.com/TiagoAMGomes/iotm2m
+git pull origin master
+
+git add .
+git commit -m "Message"
+git push origin master
+
+
+[INSTALL SQLITE3]
+sudo apt install sqlite3
+sqlite3 iotm2m.db
+.schema
+.exit
+sqlite3 iotm2m.db < create_tables.sql
+
+
+[INSTALL GCC, VALGRIND and C LIBS for SQLITE3 and JSON-C]
+sudo apt install build-essential gdb
+sudo apt-get install libsqlite3-dev
+sudo apt install libjson-c-dev
+sudo apt install valgrind

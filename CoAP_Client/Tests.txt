@@ -1,0 +1,85 @@
+Testes de pedido GET à CSEBase
+	Pedido HTTP GETaumaCSEBaseexistente
+	Pedido HTTP GETaumaCSEBasenãoexistente
+
+Testes de pedido GET à Application Entity
+	Pedido HTTP GETaumaAEexistente
+	Pedido HTTP GETaumaAEnãoexistente
+Testes de pedido POST à Application Entity
+	Verificar o POST a umaCSEBase inexistente
+	Verificar o POST a umaCSEBase existente
+
+	Verificação do header X-M2M-Origin
+	Validação do formato de X-M2M-Origin
+	Validação do header Content-Type
+	Validação do formato JSON e objecto m2m:ae
+	Validação da chave rn
+	Validação da chave api
+	Validação da chave rr
+	Validação da chave et
+	Validação das chaves lbl, poa e srv
+
+Testes de pedido PUT à Application Entity
+	Verificar o PUT numa Application Entity existente
+	Verificar o PUT numa Application Entity inexistente
+	Validação da chave et
+
+	Validação do header X-M2M-Origin
+	Validação do header Content-Type
+	Validação do formato JSON e objecto m2m:ae
+	Validação da chave rr
+	Validação da chave lbl
+	Verificar resposta ao PUT sem chaves actualizáveis
+
+Testes de pedido DELETE à Application Entity
+	Verificar o DELETE numa Application Entity existente
+	Verificar o DELETE numa Application Entity inexistente
+
+/////////////////////////////////////////////////////////////////////////////////
+
+Testes de pedido GET ao Container
+	Pedido HTTP GETaumContainerexistente
+	Pedido HTTP GETaumContainernãoexistente
+Testes de pedido POST ao Container
+	Verificar o POST a umaAEexistente
+	Verificar o POST de um Container existente
+	Verificar o POST a umaAEinexistente
+	
+
+	Validação do header X-M2M-Origin
+	Validação do header Content-Type
+	Validação do formato JSON e objecto m2m:cnt
+	Validação da chave rn
+	Validação da chave et
+	Validação das chaves mia, mbs e mni
+	Validação da chave lbl
+
+Testes de pedido PUT ao Container
+	Verificar o PUT a umaAEexistente
+	Verificar o PUT de um Container existente
+	Verificar o PUT a umaAEinexistente
+	Validação da chave et
+
+	Validação do header X-M2M-Origin
+	Validação do header Content-Type
+	Validação do formato JSON e objecto m2m:cnt
+	Validação da chave rn
+	Validação das chaves mia, mbs e mni
+	Validação da chave lbl
+
+Testes de pedido DELETE ao Container
+	Verificar o DELETE a umaAEexistente
+	Verificar o DELETE a umaAEinexistente
+
+/////////////////////////////////////////////////////////////////////////////////
+
+Testes de pedido POST ao Content_Instance
+	Verificar o POST a umaContainerexistente
+	Verificar o POST a umaContainerinexistente
+
+Testes de pedido GET ao Content_Instance
+	Pedido HTTP GET oldest inexistente
+	Pedido HTTP GET latest inexistente
+	Pedido HTTP GET oldest
+	Pedido HTTP GET latest
+	Pedido HTTP GET 

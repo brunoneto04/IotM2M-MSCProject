@@ -1,0 +1,519 @@
+SQL COMMAND TO DROP ALL TABLES:
+
+SELECT 'DROP TABLE IF EXISTS ' || name || ';' 
+FROM sqlite_master 
+WHERE type = 'table';
+
+SELECT 'DELETE FROM ' || name || ';' 
+FROM sqlite_master 
+WHERE type = 'table';
+_____________________________________________________________________________________
+
+Resource Types:
+    CSEBase             - cb    - 5
+    AE                  - ae    - 2
+    container           - cnt   - 3
+    contentInstance     - cin   - 4
+    subscription        - sub   - 23
+
+RCN (Result Content):
+    0   - nothing
+    1   - attributes
+    2   - hierarchical address
+    3   - hierarchical address and attributes
+
+_____________________________________________________________________________________
+
+CSEBase:
+    csi     - CSE-ID                    - "/mnID"
+    cst     - cseType                   - 1 (CSEBase), 2 (remoteCSE)
+    ct      - creationTime              - "20180727T135221"
+    lt      - lastModifiedTime          - "20180727T135221"
+    pi      - parentID                  - null
+    ri      - resourceID                - mnID
+    rn      - resourceName              - mn-name
+    ty      - resourceType              - 5
+    acpi    - accessControlPolicyIDs    - ["mnIDAcp"]
+    lbl     - labels                    - ["17.0.0+", "ID-CSE-01"]
+    csz     - contentSerialization      - ["application/xml", "application/json"]
+    poa     - pointOfAccess             - ["http://192.168.0.10:8282"]
+    srt     - supportedResourceType     - [1, 2, 3, 4, 5, 9, 12, 13, 14, 15, 16, 18, 23, 17, 11, 20, 19, 28, 22, 7, 21, 24, 100, 8, 10]
+    srv     - supportedReleaseVersions  - ["1", "2", "2a"]
+
+_____________________________________________________________________________________
+
+AE:
+POST /csename
+X-M2M-Origin: CAdmin
+Content-Type: application/json;ty=2
+
+Body - Required:
+    rn      - resourceName              - "temperature"
+    api     - App-ID                    - "N01.com.company.temperature"
+    rr      - requestReachability       - true
+    lbl     - labels                    - ["key1", "key2"]
+    srv     - supportedReleaseVersions  - ["3"]
+    poa     - pointOfAccess             - ["http://192.168.1.30:8080"]
+Body - Facultative:
+    et      - expirationTime            - "20180727T135221" (DEFAULT +7 DIAS)
+Headers:
+    ri      - resourceID                - (RETIRADO DO HEADER "X-M2M-Origin: CAdmin")
+    ty      - resourceType              - (RETIRADO DO HEADER "Content-Type: application/json;ty=2")
+    pi      - parentID                  - (CALCULADO A PARTIR DO URI "/csename")
+    ct      - creationTime              - (CALCULADO AUTOMATICAMENTE)
+    lt      - lastModifiedTime          - (CALCULADO AUTOMATICAMENTE)
+    aei     - AE-ID                     - (RETIRADO DO HEADER "X-M2M-Origin: CAdmin")
+
+_____________________________________________________________________________________
+
+CNT:
+    ri      - resourceID                - "cnt20180406T0857121405855183193600_cse01"
+    ty      - resourceType              - 3
+    rn      - resourceName              - "cont_temp"
+    pi      - parentID                  - "CAE0120180406T0846311405855351047680_cse01"
+    et      - expirationTime            - "99991231T235959"
+    ct      - creationTime              - "20180406T085712"
+    lt      - lastModifiedTime          - "20180406T085712"
+    st      - stateTag                  - 0
+    cni     - currentNrOfInstances      - 0
+    cbs     - currentByteSize           - 0
+    mbs     - maxByteSize               - 60000000
+    mia     - maxInstanceAge            - 1600
+    mni     - maxNrOfInstances          - 10000
+
+_____________________________________________________________________________________
+
+CIN:
+    ri      - resourceID
+    ty      - resourceType
+    rn      - resourceName
+    pi      - parentID
+    ct      - creationTime
+    lt      - lastModifiedTime
+    con     - content
+    cs      - contentSize
+    et      - expirationTime
+    st      - stateTag
+
+_____________________________________________________________________________________
+
+RESOURCES:
+    ty      - resourceType
+    ri      - resourceID
+    rn      - resourceName
+    pi      - parentID
+    ct      - creationTime
+    lmt     - lastModifiedTime
+
+_____________________________________________________________________________________
+
+O QUE FALTA FAZER:
+
+cseBase:
+    CREATE
+
+_____________________________________________________________________________________
+
+CSEBase - GET
+
+HTTP Request:
+GET /mn-name?rcn=1 HTTP/1.1
+Host: 192.168.0.10:8282
+Accept: application/json
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+X-M2M-RI: 1234
+X-M2M-RVI: 2a
+
+HTTP Response:
+HTTP/1.1 200 OK
+X-M2M-RI: 1234
+X-M2M-RSC: 2000
+Content-Length:344
+Content-Type:application/json
+X-M2M-Origin:/mnID
+X-M2M-RVI: 2a
+{
+    "m2m:cb": {
+        "acpi": [ "mnIDAcp" ],
+        "csi": "/mnID",
+        "cst": 2,
+        "csz": [ "application/xml", "application/json" ],
+        "ct": "20180727T135221",
+        "lbl": [ "17.0.0+", "ID-CSE-01" ],
+        "lt": "20180727T135221",
+        "pi": null,
+        "poa": [ "http://192.168.0.10:8282" ],
+        "ri": "mnID",
+        "rn": "mn-name",
+        "srt": [ 1, 2, 3, 4, 5, 9, 12, 13, 14, 15, 16, 18, 23, 17, 11, 20, 19, 28, 22, 7, 21, 24, 100, 8, 10 ],
+        "srv": [ "1", "2", "2a" ]
+        "ty": 5,
+    }
+}
+
+_____________________________________________________________________________________
+
+AE - POST
+
+HTTP Request:
+POST /csename HTTP/1.1
+Host: 192.168.1.30:8080
+X-M2M-Origin: CAdmin
+Content-Type: application/json;ty=2
+X-M2M-RI: 1234
+X-M2M-RVI: 3
+{
+    "m2m:ae" : {
+        "rn": "temperature",
+        "api": "N01.com.company.temperature ",
+        "lbl": ["key1", "key2"],
+        "rr": true,
+        "srv": ["3"],
+        "poa": ["http://192.168.1.30:8080"]
+    }
+}
+
+HTTP Response:
+201 Created
+content-length: 313
+content-type: application/json
+date: Tue, 30 Mar 2021 15:39:34 GMT
+x-m2m-ri: 1234
+x-m2m-rsc: 2001
+x-m2m-rvi: 3
+{
+    "m2m:ae": {
+        "rn": "temperature",
+        "api": "N01.com.company.temperature ",
+        "lbl": [ "key1", "key2" ],
+        "rr": true,
+        "srv": [ "3" ],
+        "poa": [ "http://192.168.1.30:8080" ],
+        "ri": "CAdmin",
+        "ct": "20210330T153934,791690",
+        "lt": "20210330T153934,791690",
+        "et": "20220330T153934,791714",
+        "pi": "id-in",
+        "ty": 2,
+        "aei": "CAdmin"
+    }
+}
+
+_____________________________________________________________________________________
+
+AE - GET
+
+HTTP Request:
+GET /csename/temperature HTTP/1.1
+Accept: application/json
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAdmin
+X-M2M-RI:1234
+X-M2M-RVI: 3
+
+HTTP Response:
+200 OK
+Content-Length:323
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 3
+X-M2M-RSC:2000
+{
+    "m2m:ae": {
+        "rn": "temperature",
+        "api": "N01.com.company.temperature",
+        "lbl": [ "key1", "key2" ],
+        "rr": true,
+        "srv": [ "3" ],
+        "poa": [ "http://192.168.1.30:8080" ],
+        "ri": "CSUQPRVK06v",
+        "ct": "20210407T093125,074401",
+        "lt": "20210407T093125,074401",
+        "et": "20220407T093125,074426",
+        "pi": "id-in",
+        "ty": 2,
+        "aei": "CSUQPRVK06v"
+    }
+}
+
+_____________________________________________________________________________________
+
+AE - PUT
+
+HTTP Request:
+PUT /csename/temperature HTTP/1.1
+Host: 192.168.1.30:8080
+X-M2M-Origin: CAdmin
+Content-Type:application/json
+Accept: application/json
+X-M2M-RI: 1234
+X-M2M-RVI: 3
+{
+    "m2m:ae" : {
+        "lbl": ["temperature bedroom"],
+        "poa": ["http://192.168.1.50:9090"]
+    }
+}
+
+HTTP Response:
+200 OK
+Content-Length:330
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 3
+X-M2M-RSC:2004
+{
+    "m2m:ae": {
+        "rn": "temperature",
+        "api": "N01.com.company.temperature ",
+        "lbl": [ "temperature bedroom" ],
+        "rr": true,
+        "srv": [ "3" ],
+        "poa": [ "http://192.168.1.50:9090" ],
+        "ri": "CSUQPRVK06v",
+        "ct": "20210407T093125,074401",
+        "lt": "20210407T094636,903417",
+        "et": "20220407T093125,074426",
+        "pi": "id-in",
+        "ty": 2,
+        "aei": "CSUQPRVK06v"
+    }
+}
+
+_____________________________________________________________________________________
+
+AE - DELETE
+
+HTTP Request:
+DELETE /csename/temperature HTTP/1.1
+Host: 192.168.1.30:8080
+X-M2M-Origin: CAdmin
+X-M2M-RI:1234
+X-M2M-RVI: 3
+
+HTTP Response:
+200 OK
+Content-Length:0
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 3
+X-M2M-RSC:2002
+
+_____________________________________________________________________________________
+
+Container - POST
+
+HTTP Request:
+POST /mn-name/ae_sensor HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+Content-Type: application/json;ty=3
+X-M2M-RI: 1234
+X-M2M-RVI: 2a
+{
+    "m2m:cnt": {
+        "rn": "cont_temp"
+    }
+}
+
+HTTP Response:
+201 Created
+Content-Length:265
+Content-Location:/mnID/cnt20180406T0857121405855183193600_cse01
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 2a X-M2M-RSC:2001
+{
+    "m2m:cnt": {
+        "cbs": 0,
+        "cni": 0,
+        "ct": "20180406T085712",
+        "et": "99991231T235959",
+        "lt": "20180406T085712",
+        "mbs": 60000000,
+        "mia": 1600,
+        "mni": 10000,
+        "pi": "CAE0120180406T0846311405855351047680_cse01",
+        "ri": "cnt20180406T0857121405855183193600_cse01",
+        "rn": "cont_temp",
+        "st": 0,
+        "ty": 3
+    }
+}
+
+_____________________________________________________________________________________
+
+Container - GET
+
+HTTP Request:
+GET /mn-name/ae_sensor/cont_temp HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+Accept: application/json
+X-M2M-RI: 1234
+X-M2M-RVI: 2a
+
+HTTP Response:
+200 OK
+Content-Length:265
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 2a
+X-M2M-RSC:2000
+{
+    "m2m:cnt": {
+        "cbs": 0,
+        "cni": 0,
+        "ct": "20180406T092758",
+        "et": "99991231T235959",
+        "lt": "20180406T092758",
+        "mbs": 60000000,
+        "mia": 1600,
+        "mni": 10000,
+        "pi": "CAE0120180406T0846311405855351047680_cse01",
+        "ri": "cnt20180406T0927581405855602828800_cse01",
+        "rn": "cont_temp",
+        "st": 0,
+        "ty": 3
+    }
+}
+
+_____________________________________________________________________________________
+
+Container - PUT
+
+HTTP Request:
+PUT /mn-name/ae_sensor/cont_temp HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+Accept: application/json
+X-M2M-RI:1234
+X-M2M-RVI: 2a
+{
+    "m2m:cnt": {
+        "mni": 300,
+        "lbl": ["indoor_temp"]
+    }
+}
+
+HTTP Response:
+200 OK
+Content-Length:285
+Content-Type:application/json
+X-M2M-RI:1234
+X-M2M-RVI: 2a
+X-M2M-RSC:2004
+{ 
+    "m2m:cnt": {
+        "cbs": 0,
+        "cni": 0,
+        "ct": "20180406T125807",
+        "et": "99991231T235959",
+        "lbl": [ "indoor_temp" ],
+        "lt": "20180406T130109",
+        "mbs": 60000000,
+        "mia": 1600,
+        "mni": 300,
+        "pi": "CAE0120180406T0846311405855351047680_cse01",
+        "ri": "cnt20180406T1258071405855183193603_cse01",
+        "rn": "cont_temp",
+        "st": 1,
+        "ty": 3
+    }
+}
+
+_____________________________________________________________________________________
+
+Container - DELETE
+
+HTTP Request:
+DELETE /mn-name/ae_sensor/cont_temp?rcn=0 HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+X-M2M-RI:1234
+X-M2M-RVI: 2a
+
+HTTP Response:
+200 OK
+Content-Length:0
+X-M2M-RI:1234
+X-M2M-RVI: 2a
+X-M2M-RSC:2002
+
+_____________________________________________________________________________________
+
+Content Instances - POST
+
+HTTP Request:
+POST /mn-name/ae_sensor/cont_temp?rcn=0 HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+Content-Type: application/json;ty=4
+X-M2M-RI: 1234
+X-M2M-RVI: 2a
+{ 
+    "m2m:cin": { 
+        "con": "20" 
+    } 
+} 
+
+HTTP Response: 
+201 Created 
+Content-Length:258 
+Content-Location:/mnID/cin20180406T1355091405855351047683_cse01 
+Content-Type:application/json 
+X-M2M-RI:1234 
+X-M2M-RVI: 2a 
+X-M2M-RSC:2001 
+{ 
+    "m2m:cin": { 
+        "con": "20", 
+        "cs": 2, 
+        "ct": "20180406T135509", 
+        "et": "99991231T235959", 
+        "lt": "20180406T135509", 
+        "pi": "cnt20180406T1353041405855518901760_cse01", 
+        "ri": "cin20180406T1355091405855351047683_cse01", 
+        "rn": "cin20180406T1355091405855351047682_cse01", 
+        "st": 1, 
+        "ty": 4 
+    }
+}
+
+_____________________________________________________________________________________
+
+Content Instances - GET
+
+HTTP Request:
+GET /mn-name/ae_sensor/cont_temp/la HTTP/1.1
+Host: 192.168.0.10:8282
+X-M2M-Origin: CAE0120180406T0846311405855351047680_cse01
+X-M2M-RI: 1234
+X-M2M-RVI: 2a 
+
+HTTP Response: 
+200 OK 
+Content-Length:258 
+Content-Type:application/json 
+X-M2M-RI:1234 
+X-M2M-RVI: 2a 
+X-M2M-RSC:2000 
+{ 
+    "m2m:cin": { 
+        "con": "20", 
+        "cs": 2, 
+        "ct": "20180406T140213", 
+        "et": "99991231T235959", 
+        "lt": "20180406T140213", 
+        "pi": "cnt20180406T1353041405855518901760_cse01", 
+        "ri": "cin20180406T1402131405855770682883_cse01", 
+        "rn": "cin20180406T1402131405855770682882_cse01", 
+        "st": 4, 
+        "ty": 4
+    }
+}
+
+_____________________________________________________________________________________
+
+Content Instances - GET
+
