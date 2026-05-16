@@ -4,6 +4,9 @@ CC = gcc
 # Compiler flags
 CFLAGS = -Iinclude -I/usr/include/x86_64-linux-gnu
 
+# For enabling logging, uncomment the line below:
+CFLAGS += -DENABLE_LOGGING
+
 # Libraries
 LIBS = -L/usr/local/lib -lcoap-3 -lssl -lcrypto -lcurl -lpaho-mqtt3cs -lpaho-mqtt3c -ljson-c -lsqlite3 -lpthread
 
