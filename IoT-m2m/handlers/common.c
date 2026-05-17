@@ -207,8 +207,8 @@ int is_future_datetime(const char *datetime)
     time_t current_time = time(NULL);
 
     // Debugging statements
-    printf("Parsed input time: %s", ctime(&input_time));
-    printf("Current time: %s", ctime(&current_time));
+    LOG("Parsed input time: %s", ctime(&input_time));
+    LOG("Current time: %s", ctime(&current_time));
 
     // Check if the input time is in the future
     return difftime(input_time, current_time) > 0.0;
@@ -251,9 +251,9 @@ int is_datetime_less_than_current_plus_mia(const char *datetime, int mia)
     time_t target_time = current_time + mia;
 
     // Debugging statements
-    printf("Parsed input time: %s", ctime(&input_time));
-    printf("Current time: %s", ctime(&current_time));
-    printf("Target time (current time + mia): %s", ctime(&target_time));
+    LOG("Parsed input time: %s", ctime(&input_time));
+    LOG("Current time: %s", ctime(&current_time));
+    LOG("Target time (current time + mia): %s", ctime(&target_time));
 
     // Check if the input time is less than the target time
     return difftime(input_time, target_time) < 0.0;
@@ -277,7 +277,7 @@ char *get_current_time_plus_mia(int mia)
     if (result == NULL)
     {
         // Handle memory allocation failure
-        fprintf(stderr, "Failed to allocate memory for result string\n");
+        LOG_ERR("Failed to allocate memory for result string");
         exit(EXIT_FAILURE);
     }
 
@@ -285,7 +285,7 @@ char *get_current_time_plus_mia(int mia)
     if (strftime(result, 20, "%Y-%m-%d %H:%M:%S", tm_target) == 0)
     {
         // Handle strftime failure
-        fprintf(stderr, "Failed to format time string\n");
+        LOG_ERR("Failed to format time string");
         free(result);
         exit(EXIT_FAILURE);
     }
