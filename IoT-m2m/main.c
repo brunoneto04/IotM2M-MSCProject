@@ -27,12 +27,20 @@ AUTHORSHIP File Updated
 
 #include "main.h"
 #include "response_params.h"
+#ifdef ENABLE_MQTT
 #include "mqtt_client.h"
 #include "mqtt_handler.h"
+#endif
 #include <signal.h>
 #include <pthread.h>
 
-pthread_t web_server_thread, check_thread, coap_server_thread;
+pthread_t check_thread;
+#ifdef ENABLE_HTTP
+pthread_t web_server_thread;
+#endif
+#ifdef ENABLE_COAP
+pthread_t coap_server_thread;
+#endif
 volatile sig_atomic_t stop = 0;
 
 //Signal handler
@@ -61,6 +69,7 @@ int main()
         return 1;
     }
 
+#ifdef ENABLE_HTTP
     // Create and start the web server thread
     if (pthread_create(&web_server_thread, NULL, start_web_server, NULL) != 0)
     {
@@ -69,7 +78,9 @@ int main()
     }
 
     sleep(1); // Give the web server some time to start
+#endif
 
+#ifdef ENABLE_COAP
     // Create and start the CoAP server thread
     if (pthread_create(&coap_server_thread, NULL, start_coap_server, NULL) != 0) {
         fprintf(stderr, "Error creating CoAP server thread\n");
@@ -77,15 +88,21 @@ int main()
     }
 
     sleep(1); // Give the CoAP server some time to start
+#endif
 
     // Wait for the threads to complete (they won't in this case)
     pthread_join(check_thread, NULL);
+#ifdef ENABLE_HTTP
     pthread_join(web_server_thread, NULL);
+#endif
+#ifdef ENABLE_COAP
     pthread_join(coap_server_thread, NULL);
+#endif
 
     return 0;
 }
 
+#ifdef ENABLE_HTTP
 void *start_web_server(void *arg) {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
@@ -154,7 +171,9 @@ void *start_web_server(void *arg) {
     close(server_socket);
     return NULL;
 }
+#endif /* ENABLE_HTTP */
 
+#ifdef ENABLE_COAP
 void *start_coap_server(void *arg) { 
     coap_context_t *ctx;
     coap_address_t serv_addr;
@@ -192,7 +211,9 @@ void *start_coap_server(void *arg) {
     printf("[CoAP] CoAP cleanup...");
     return NULL;
 }
+#endif /* ENABLE_COAP */
 
+#ifdef ENABLE_HTTP
 void handle_request(int client_socket)
 {
     struct response_params http_params = {
@@ -680,7 +701,9 @@ void handle_request(int client_socket)
     free(subscription_name);
     free(key);
 }
+#endif /* ENABLE_HTTP */
 
+#ifdef ENABLE_COAP
 void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const coap_pdu_t *request,const coap_string_t *query,coap_pdu_t *response)
 {
     struct response_params coap_params = {
@@ -975,6 +998,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     free(container_name);
     free(content_name);
 }
+#endif /* ENABLE_COAP */
 
 // Function to delete expired resources
 void *check_and_delete_expired_resources(void *arg)
@@ -1125,6 +1149,7 @@ char *extract_json_key(const char *json) {
     return key;
 }
 
+#ifdef ENABLE_MQTT
 //MQTT callback functions
 void on_connect_callback(void* context) {
     printf("[MQTT] Connected to MQTT broker\n");
@@ -1145,3 +1170,4 @@ void on_error_callback(void* context, int rc) {
         stop = 1;
     }
 }
+#endif /* ENABLE_MQTT */
