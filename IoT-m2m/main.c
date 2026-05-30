@@ -251,6 +251,7 @@ void handle_request(int client_socket)
         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
         write(client_socket, error_message, strlen(error_message));
         close(client_socket);
+        free(key);
         free(method);
         return;
     }
@@ -432,11 +433,13 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
 
@@ -448,20 +451,22 @@ void handle_request(int client_socket)
             printf("[HTTP] Unsupported parameter scenario: content_name\n");
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
-                    
+
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
         else if (container_name != NULL)
         {
             // Check if the request is for a subscription
-            char *key = get_json_key_from_request(request);
-            if (key && strcmp(key, "m2m:sub") == 0) { // Check if the request is "m2m:sub"
+            char *sub_key = get_json_key_from_request(request);
+            if (sub_key && strcmp(sub_key, "m2m:sub") == 0) { // Check if the request is "m2m:sub"
                 
                 // VALIDATION: Check if csebase_name, ae_name and container exist
                 struct response_params validation_params = {0};
@@ -474,12 +479,20 @@ void handle_request(int client_socket)
                     // Container doesn't exist - send only JSON error
                     const char *error_json = "{\"error\":\"Container not found for subscription\"}";
                     write(client_socket, error_json, strlen(error_json));
-                    
+
                     if (jsonBody) {
                         free(jsonBody);
                     }
+                    free(sub_key);
+                    close(client_socket);
                     free(key);
-                    return; // Exit early
+                    free(method);
+                    free(csebase_name);
+                    free(app_name);
+                    free(container_name);
+                    free(content_name);
+                    free(subscription_name);
+                    return;
                 }
                 // Container exists, proceed with subscription handling
                 free(jsonBody); // Clean up validation result
@@ -523,9 +536,12 @@ void handle_request(int client_socket)
                         write(client_socket, error, strlen(error));
                     }
                 }
+                free(sub_key);
             } else if (key && strcmp(key, "m2m:cin") == 0) { // Check if the request is "m2m:cin"
+                free(sub_key);
                 handle_request_cin_post(&http_params, csebase_name, app_name, container_name, request, body);
             } else {
+                free(sub_key);
                 // Unsupported request type
                 const char *error_message = "HTTP/1.1 400 Bad Request\r\n"
                                         "Content-Type: application/json\r\n"
@@ -533,8 +549,6 @@ void handle_request(int client_socket)
                                         "\r\n{\"error\":\"Unsupported request\"}";
                 write(client_socket, error_message, strlen(error_message));
             }
-
-            free(key);
         }
         else if (app_name != NULL)
         {
@@ -551,6 +565,7 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
@@ -576,6 +591,7 @@ void handle_request(int client_socket)
                 const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
                 write(client_socket, error_message, strlen(error_message));
                 close(client_socket);
+                free(key);
                 free(method);
                 free(csebase_name);
                 free(app_name);
@@ -606,6 +622,7 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
@@ -642,11 +659,13 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
     }
@@ -854,6 +873,10 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
             free(body);
+            free(csebase_name);
+            free(app_name);
+            free(container_name);
+            free(content_name);
             return;
         }
 
@@ -907,6 +930,10 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
             free(body);
+            free(csebase_name);
+            free(app_name);
+            free(container_name);
+            free(content_name);
             return;
         }
         // Handle PUT request

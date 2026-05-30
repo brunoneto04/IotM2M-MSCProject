@@ -980,8 +980,8 @@ bool handle_subscription_request(const char *request_json, const char *resource_
     if (get_subscription(resource_name, &sub))
     {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 403 Already exists\r\n\r\n");
-        
         write(client_socket, response, strlen(response));
+        json_object_put(request);
         return false;
     }
 

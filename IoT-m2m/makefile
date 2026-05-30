@@ -3,6 +3,9 @@ CC = gcc
 
 # Compiler flags
 CFLAGS = -Iinclude -I/usr/include/x86_64-linux-gnu
+CFLAGS += -DENABLE_HTTP
+CFLAGS += -DENABLE_COAP
+CFLAGS += -DENABLE_MQTT
 
 # Libraries
 LIBS = -L/usr/local/lib -lcoap-3 -lssl -lcrypto -lcurl -lpaho-mqtt3cs -lpaho-mqtt3c -ljson-c -lsqlite3 -lpthread

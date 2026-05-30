@@ -35,7 +35,7 @@ void handle_request_csebase_create()
     }
 
     // Verificar se existe uma CSEBase criada anteriormente
-    if (csebase_exists(db))
+ /*   if (csebase_exists(db))
     {
         char choice;
 
@@ -122,6 +122,23 @@ void handle_request_csebase_create()
             parse_input(input, poa, &poa_count);
         }
     }
+
+    // Automatically set csi and ri based on rn
+    snprintf(csi, sizeof(csi), "\\%s", rn);
+    snprintf(ri, sizeof(ri), "%sID", rn);
+*/
+    // TEMP: usar valores por defeito para correr Valgrind (interacao removida temporariamente)
+    if (csebase_exists(db))
+    {
+        sqlite3_close(db);
+        return;
+    }
+
+    // Set default values
+    cst = DEFAULT_CST;
+    parse_input(DEFAULT_LBL, lbl, &lbl_count);
+    parse_input(DEFAULT_POA, poa, &poa_count);
+    strcpy(rn, DEFAULT_RN);
 
     // Automatically set csi and ri based on rn
     snprintf(csi, sizeof(csi), "\\%s", rn);
