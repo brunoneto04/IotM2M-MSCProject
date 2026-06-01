@@ -17,6 +17,7 @@
 #define PORT 8080
 #define COAP_PORT 5683
 
+void handle_shutdown(int signal);
 void *check_and_delete_expired_resources(void *arg);
 char *get_json_key_from_request(const char *request);
 char *extract_json_key(const char *json);

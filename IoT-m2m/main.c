@@ -43,12 +43,11 @@ pthread_t coap_server_thread;
 #endif
 volatile sig_atomic_t stop = 0;
 
-//Signal handler
-void handle_signal(int signal)
+void handle_shutdown(int signal)
 {
-    if (signal == SIGINT) {
-        stop = 1;
-    }
+    (void)signal;
+    write(STDOUT_FILENO, "\n", 1);
+    stop = 1;
 }
 
 int main()
@@ -56,8 +55,8 @@ int main()
 
     system("mkdir -p certs");
 
-    // Set up the SIGINT signal handler
-    signal(SIGINT, handle_signal);
+    signal(SIGINT,  handle_shutdown);
+    signal(SIGTERM, handle_shutdown);
 
     // Write CSEBase value to database
     handle_request_csebase_create();
@@ -169,6 +168,7 @@ void *start_web_server(void *arg) {
 
     // Close the server socket
     close(server_socket);
+    printf("[HTTP] Server stopped.\n");
     return NULL;
 }
 #endif /* ENABLE_HTTP */
@@ -208,7 +208,7 @@ void *start_coap_server(void *arg) {
 
     coap_free_context(ctx);
     coap_cleanup();
-    printf("[CoAP] CoAP cleanup...");
+    printf("[CoAP] CoAP cleanup...\n");
     return NULL;
 }
 #endif /* ENABLE_COAP */
