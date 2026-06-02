@@ -3,6 +3,7 @@
 
 #include <sqlite3.h>
 #include <stdbool.h>
+#include "response_params.h"
 
 /**
  * @brief Data Structure for the Schedule Resource (TS-0001)
@@ -21,5 +22,10 @@ typedef struct {
 } Schedule;
 
 void init_schedule_table(void);
+
+void handle_schedule_create(struct response_params *params, const char *pi, const char *body);
+void handle_schedule_retrieve(struct response_params *params, const char *identifier);
+void handle_schedule_update(struct response_params *params, const char *identifier);
+void handle_schedule_delete(struct response_params *params, const char *identifier);
 
 #endif
