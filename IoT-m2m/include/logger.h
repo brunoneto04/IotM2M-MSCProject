@@ -4,8 +4,18 @@
 #include <stdio.h>
 
 #ifdef ENABLE_LOGGING
-  #define LOG(fmt, ...)   fprintf(stderr, "[LOG] " fmt "\n", ##__VA_ARGS__)
-  #define LOG_ERR(fmt, ...) fprintf(stderr, "[ERR] " fmt "\n", ##__VA_ARGS__)
+  #define LOG(fmt, ...)                                                   
+     do {                                                                  
+       fprintf(stderr, "[LOG] ");                                          
+       fprintf(stderr, fmt, ##__VA_ARGS__);                                
+       fprintf(stderr, "\n");                                              
+     } while (0)
+   #define LOG_ERR(fmt, ...)                                               
+     do {                                                                  
+       fprintf(stderr, "[ERR] ");                                          
+       fprintf(stderr, fmt, ##__VA_ARGS__);                                
+       fprintf(stderr, "\n");                                              
+     } while (0)
 #else
   #define LOG(fmt, ...)
   #define LOG_ERR(fmt, ...)

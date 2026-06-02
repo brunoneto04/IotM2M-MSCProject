@@ -207,8 +207,8 @@ int is_future_datetime(const char *datetime)
     time_t current_time = time(NULL);
 
     // Debugging statements
-    LOG("Parsed input time: %s", ctime(&input_time));
-    LOG("Current time: %s", ctime(&current_time));
+    LOG("Parsed input time: %.24s", ctime(&input_time));
+    LOG("Current time: %.24s", ctime(&current_time));
 
     // Check if the input time is in the future
     return difftime(input_time, current_time) > 0.0;

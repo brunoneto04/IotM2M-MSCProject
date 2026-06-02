@@ -245,9 +245,19 @@ void handle_request(int client_socket)
         method = strdup(token);
     }
     // Validate HTTP method
-    if (method == NULL || (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 && strcmp(method, "PUT") != 0 && strcmp(method, "DELETE") != 0))
+    if (method == NULL)
     {
-        // Invalid or unsupported HTTP method
+        // Invalid HTTP method
+         LOG("[HTTP] Unsupported HTTP method: <null>");
+         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
+         write(client_socket, error_message, strlen(error_message));
+         close(client_socket);
+         free(method);
+         return;
+     }
+     else if (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 && strcmp(method, "PUT") != 0 && strcmp(method, "DELETE") != 0)
+     {
+         // Unsupported HTTP method
         LOG("[HTTP] Unsupported HTTP method: %s", method);
         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
         write(client_socket, error_message, strlen(error_message));
@@ -362,7 +372,7 @@ void handle_request(int client_socket)
                         csebase_name, app_name, container_name);
                 
                 bool getSubscription = handle_get_subscription(client_socket, subscription_name, resource_uri);
-                //LOG("%u\n", getSubscription);
+                //LOG("%u", getSubscription);
             }
             else if (strcmp(ty, "4") == 0)
             {
@@ -629,12 +639,12 @@ void handle_request(int client_socket)
         }
         else if (subscription_name != NULL && strcmp(ty, "23") == 0) // Verify if it is a subscription to delete
         {
-            //LOG("Subscription name exists in the url, %s\n", subscription_name);
+            //LOG("Subscription name exists in the url, %s", subscription_name);
 
             // Delete subscription
             bool getSubscription = handle_delete_subscription(client_socket, subscription_name);
 
-            //LOG("Ola1000000\n");
+            //LOG("Ola1000000");
         }
         else
         {
@@ -686,20 +696,20 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     coap_pdu_type_t msg_type = coap_pdu_get_type(request);
     unsigned int msg_id = coap_pdu_get_mid(request);
     
-    LOG("\n[CoAP] CoAP request received: \nMID=%u", coap_pdu_get_mid(request));
+    LOG("[CoAP] CoAP request received: \nMID=%u", coap_pdu_get_mid(request));
     
     if (msg_type == COAP_MESSAGE_CON) {
         coap_pdu_set_type(response, COAP_MESSAGE_ACK);
         coap_pdu_set_mid(response, msg_id);  // Match message ID
-        LOG("\n[CoAP] Type=CON");
+        LOG("[CoAP] Type=CON");
     } 
     else if (msg_type == COAP_MESSAGE_NON) {
         // Non-confirmable message - send NON response
         coap_pdu_set_type(response, COAP_MESSAGE_NON);
-        LOG("\n[CoAP] Type=NON");
+        LOG("[CoAP] Type=NON");
     }
     else if (msg_type == COAP_MESSAGE_ACK) {
-        LOG("\n[CoAP] Type=ACK");
+        LOG("[CoAP] Type=ACK");
         return;
     }
 
@@ -850,7 +860,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
         if (!body || strlen(body) == 0) {
             // No body provided
-            LOG("[CoAP] No body provided: %s\n", method);
+            LOG("[CoAP] No body provided: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
@@ -903,7 +913,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
         if (!body || strlen(body) == 0) {
             // No body provided
-            LOG("[CoAP] No body provided: %s\n", method);
+            LOG("[CoAP] No body provided: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
@@ -923,7 +933,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         else {
             // Unsupported parameter scenario
-            LOG("[CoAP] Unsupported parameter scenario: %s\n", method);
+            LOG("[CoAP] Unsupported parameter scenario: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
         }
         free(body);
@@ -939,7 +949,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         else {
             // Unsupported parameter scenario
-            LOG("[CoAP] Unsupported parameter scenario: %s\n", method);
+            LOG("[CoAP] Unsupported parameter scenario: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
         }
     }
@@ -1017,7 +1027,7 @@ void *check_and_delete_expired_resources(void *arg)
         struct tm *tm_target = localtime(&c_time);
         char current_time[20];
         strftime(current_time, sizeof(current_time), "%Y-%m-%d %H:%M:%S", tm_target);
-        //LOG("Current UTC timestamp: %s\n", current_time);
+        //LOG("Current UTC timestamp: %s", current_time);
 
         sqlite3_bind_text(stmt, 1, current_time, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, current_time, -1, SQLITE_STATIC);
@@ -1031,7 +1041,7 @@ void *check_and_delete_expired_resources(void *arg)
             char *container_rn = (char *)sqlite3_column_text(stmt, 2);
             char *content_instance_rn = (char *)sqlite3_column_text(stmt, 3);
 
-LOG("[CoAP] csebase_rn: %s", csebase_rn != NULL ? csebase_rn : "NULL");
+             LOG("[CoAP] csebase_rn: %s", csebase_rn != NULL ? csebase_rn : "NULL");
              LOG("[CoAP] application_entity_rn: %s", application_entity_rn != NULL ? application_entity_rn : "NULL");
              LOG("[CoAP] container_rn: %s", container_rn != NULL ? container_rn : "NULL");
              LOG("[CoAP] content_instance_rn: %s", content_instance_rn != NULL ? content_instance_rn : "NULL");
