@@ -59,6 +59,9 @@ int main()
     signal(SIGINT,  handle_shutdown);
     signal(SIGTERM, handle_shutdown);
 
+    //Initialize the database schema for the new Schedule feature
+    init_schedule_table();
+
     // Write CSEBase value to database
     handle_request_csebase_create();
 
