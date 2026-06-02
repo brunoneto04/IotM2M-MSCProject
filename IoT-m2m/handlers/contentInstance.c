@@ -137,7 +137,10 @@ char *handle_request_cin_get(struct response_params *params, char *csebase_name,
             }
         }
 
-        // Add closing braces for the JSON response
+        // Remove trailing ", " and close JSON
+        size_t len = strlen(jsonBody);
+        if (len >= 2 && jsonBody[len-2] == ',' && jsonBody[len-1] == ' ')
+            jsonBody[len-2] = '\0';
         strcat(jsonBody, "}}");
 
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
@@ -1213,7 +1216,9 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
             
             const char* notification_content = json_object_to_json_string(notification);
             
+#ifdef ENABLE_MQTT
             handle_mqtt_notification(child_resource_uri, notification_content, 3);
+#endif
             
             json_object_put(notification);
         }

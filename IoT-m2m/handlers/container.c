@@ -2466,7 +2466,9 @@ void handle_request_container_put(struct response_params *params, char *csebase_
     const char *notification_json = json_object_to_json_string(notification_content);
 
     // Enviar notificação para evento Update_of_Resource (net=1)
-    handle_mqtt_notification(resource_uri,body, 1);
+#ifdef ENABLE_MQTT
+    handle_mqtt_notification(resource_uri, body, 1);
+#endif
 
     // Limpar objeto JSON da notificação
     json_object_put(notification_content);
@@ -2648,7 +2650,9 @@ void handle_request_container_delete(struct response_params *params, char *cseba
 
                     printf("A Enviar notificação de DELETE_OF_RESOURCE");
 
+#ifdef ENABLE_MQTT
                     handle_mqtt_notification(resource_uri, "", 2);
+#endif
 
                     free(container_data_json);
             }
