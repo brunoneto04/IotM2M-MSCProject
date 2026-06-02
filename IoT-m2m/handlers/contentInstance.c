@@ -10,6 +10,7 @@ AUTHORSHIP -------------------------------------------------
 
 #include "../include/contentInstance.h"
 #include "subscription.h"
+#include "logger.h"
 
 char *handle_request_cin_get(struct response_params *params, char *csebase_name, char *ae_name, char *container_name, char *cin_name, char *request_type)
 {
@@ -228,7 +229,7 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     }
 
     // Print the JSON body for debugging purposes
-    printf("jsonBody: %s\n", jsonBody);
+    LOG("jsonBody: %s", jsonBody);
 
     // Attempt to parse the JSON string
     json_object *root = json_tokener_parse(jsonBody);
@@ -415,7 +416,7 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     rc = sqlite3_open(DB_PATH, &db);
     if (rc != SQLITE_OK)
     {
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        LOG_ERR("Cannot open database: %s", sqlite3_errmsg(db));
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
         {
             snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
