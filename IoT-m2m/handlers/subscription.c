@@ -17,7 +17,9 @@ valgrind ./iotm2m
 valgrind --leak-check=yes ./iotm2m
 */
 #include "subscription.h"
+#ifdef ENABLE_MQTT
 #include "mqtt_client.h"
+#endif
 
 #include <sys/time.h>
 #include <sqlite3.h>
@@ -367,6 +369,7 @@ bool get_subscription(const char *resource_name, Subscription *sub)
     return rc;
 }
 
+#ifdef ENABLE_MQTT
 static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_size, bool *use_tls)
 {
     *use_tls = false;
@@ -407,6 +410,7 @@ static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_s
 
     printf("[MQTT] TLS habilitado: %s\n", *use_tls ? "SIM" : "NÃO");
 }
+#endif /* ENABLE_MQTT */
 
 static bool should_notify_for_event(const char *subscription_event_types, int actual_event_type, const char *resource_uri, const char *subscription_uri)
 {
@@ -550,6 +554,7 @@ static void normalize_uri(const char *uri, char *normalized, size_t size)
     }
 }
 
+#ifdef ENABLE_MQTT
 void handle_mqtt_notification(const char *resource_uri, const char *content, int event_type)
 {
     // Verificar se a notificação é duplicada (manter como está)
@@ -890,6 +895,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
     sqlite3_finalize(stmt);
     sqlite3_close(db);
 }
+#endif /* ENABLE_MQTT */
 
 // Função para extrair conteúdo real de um JSON
 static json_object *extract_content_from_json(const char *content)
@@ -980,8 +986,8 @@ bool handle_subscription_request(const char *request_json, const char *resource_
     if (get_subscription(resource_name, &sub))
     {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 403 Already exists\r\n\r\n");
-        
         write(client_socket, response, strlen(response));
+        json_object_put(request);
         return false;
     }
 
@@ -1101,6 +1107,7 @@ bool handle_subscription_request(const char *request_json, const char *resource_
     return success;
 }
 
+#ifdef ENABLE_MQTT
 static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
     if (!uri || !info) {
         return false;
@@ -1306,9 +1313,10 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
     }
     
     printf("[MQTT] URI completa - Host: %s, Port: %d, TLS: %s, Topic: %s\n",info->host, info->port, info->use_tls ? "sim" : "não", info->topic);
-    
+
     return true;
 }
+#endif /* ENABLE_MQTT */
 
 // Função para validar combinações nct/net
 static bool is_valid_nct_net_combination(int nct, int net) {
@@ -1336,6 +1344,7 @@ static bool is_valid_nct_net_combination(int nct, int net) {
     return true;
 }
 
+#ifdef ENABLE_MQTT
 static void extract_subscriber_id_enhanced(const char *uri, char *buffer, size_t buffer_size, bool *use_tls, MQTTURIInfo *uri_info)
 {
     if (!uri || !buffer || !use_tls || !uri_info) {
@@ -1431,6 +1440,7 @@ static void extract_subscriber_id_enhanced(const char *uri, char *buffer, size_t
 
     }
 }
+#endif /* ENABLE_MQTT */
 
 // 1. Handler para GET subscription
 bool handle_get_subscription(int client_socket, const char *resource_name, const char *resource_uri/*, char *response, size_t response_size*/)

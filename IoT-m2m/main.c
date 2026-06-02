@@ -28,20 +28,27 @@ AUTHORSHIP File Updated
 #include "logger.h"
 #include "main.h"
 #include "response_params.h"
+#ifdef ENABLE_MQTT
 #include "mqtt_client.h"
 #include "mqtt_handler.h"
+#endif
 #include <signal.h>
 #include <pthread.h>
 
-pthread_t web_server_thread, check_thread, coap_server_thread;
+pthread_t check_thread;
+#ifdef ENABLE_HTTP
+pthread_t web_server_thread;
+#endif
+#ifdef ENABLE_COAP
+pthread_t coap_server_thread;
+#endif
 volatile sig_atomic_t stop = 0;
 
-//Signal handler
-void handle_signal(int signal)
+void handle_shutdown(int signal)
 {
-    if (signal == SIGINT) {
-        stop = 1;
-    }
+    (void)signal;
+    write(STDOUT_FILENO, "\n", 1);
+    stop = 1;
 }
 
 int main()
@@ -49,8 +56,8 @@ int main()
 
     system("mkdir -p certs");
 
-    // Set up the SIGINT signal handler
-    signal(SIGINT, handle_signal);
+    signal(SIGINT,  handle_shutdown);
+    signal(SIGTERM, handle_shutdown);
 
     // Write CSEBase value to database
     handle_request_csebase_create();
@@ -62,6 +69,7 @@ int main()
         return 1;
     }
 
+#ifdef ENABLE_HTTP
     // Create and start the web server thread
     if (pthread_create(&web_server_thread, NULL, start_web_server, NULL) != 0)
     {
@@ -70,7 +78,9 @@ int main()
     }
 
     sleep(1); // Give the web server some time to start
+#endif
 
+#ifdef ENABLE_COAP
     // Create and start the CoAP server thread
     if (pthread_create(&coap_server_thread, NULL, start_coap_server, NULL) != 0) {
         LOG_ERR("Error creating CoAP server thread");
@@ -78,15 +88,21 @@ int main()
     }
 
     sleep(1); // Give the CoAP server some time to start
+#endif
 
     // Wait for the threads to complete (they won't in this case)
     pthread_join(check_thread, NULL);
+#ifdef ENABLE_HTTP
     pthread_join(web_server_thread, NULL);
+#endif
+#ifdef ENABLE_COAP
     pthread_join(coap_server_thread, NULL);
+#endif
 
     return 0;
 }
 
+#ifdef ENABLE_HTTP
 void *start_web_server(void *arg) {
     int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
@@ -153,9 +169,12 @@ void *start_web_server(void *arg) {
 
     // Close the server socket
     close(server_socket);
+    printf("[HTTP] Server stopped.\n");
     return NULL;
 }
+#endif /* ENABLE_HTTP */
 
+#ifdef ENABLE_COAP
 void *start_coap_server(void *arg) { 
     coap_context_t *ctx;
     coap_address_t serv_addr;
@@ -193,7 +212,9 @@ void *start_coap_server(void *arg) {
     LOG("[CoAP] CoAP cleanup...");
     return NULL;
 }
+#endif /* ENABLE_COAP */
 
+#ifdef ENABLE_HTTP
 void handle_request(int client_socket)
 {
     struct response_params http_params = {
@@ -262,6 +283,7 @@ void handle_request(int client_socket)
         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
         write(client_socket, error_message, strlen(error_message));
         close(client_socket);
+        free(key);
         free(method);
         return;
     }
@@ -443,11 +465,13 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
 
@@ -459,20 +483,22 @@ void handle_request(int client_socket)
             LOG("[HTTP] Unsupported parameter scenario: content_name");
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
-                    
+
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
         else if (container_name != NULL)
         {
             // Check if the request is for a subscription
-            char *key = get_json_key_from_request(request);
-            if (key && strcmp(key, "m2m:sub") == 0) { // Check if the request is "m2m:sub"
+            char *sub_key = get_json_key_from_request(request);
+            if (sub_key && strcmp(sub_key, "m2m:sub") == 0) { // Check if the request is "m2m:sub"
                 
                 // VALIDATION: Check if csebase_name, ae_name and container exist
                 struct response_params validation_params = {0};
@@ -485,12 +511,20 @@ void handle_request(int client_socket)
                     // Container doesn't exist - send only JSON error
                     const char *error_json = "{\"error\":\"Container not found for subscription\"}";
                     write(client_socket, error_json, strlen(error_json));
-                    
+
                     if (jsonBody) {
                         free(jsonBody);
                     }
+                    free(sub_key);
+                    close(client_socket);
                     free(key);
-                    return; // Exit early
+                    free(method);
+                    free(csebase_name);
+                    free(app_name);
+                    free(container_name);
+                    free(content_name);
+                    free(subscription_name);
+                    return;
                 }
                 // Container exists, proceed with subscription handling
                 free(jsonBody); // Clean up validation result
@@ -534,9 +568,12 @@ void handle_request(int client_socket)
                         write(client_socket, error, strlen(error));
                     }
                 }
+                free(sub_key);
             } else if (key && strcmp(key, "m2m:cin") == 0) { // Check if the request is "m2m:cin"
+                free(sub_key);
                 handle_request_cin_post(&http_params, csebase_name, app_name, container_name, request, body);
             } else {
+                free(sub_key);
                 // Unsupported request type
                 const char *error_message = "HTTP/1.1 400 Bad Request\r\n"
                                         "Content-Type: application/json\r\n"
@@ -544,8 +581,6 @@ void handle_request(int client_socket)
                                         "\r\n{\"error\":\"Unsupported request\"}";
                 write(client_socket, error_message, strlen(error_message));
             }
-
-            free(key);
         }
         else if (app_name != NULL)
         {
@@ -562,6 +597,7 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
@@ -587,6 +623,7 @@ void handle_request(int client_socket)
                 const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
                 write(client_socket, error_message, strlen(error_message));
                 close(client_socket);
+                free(key);
                 free(method);
                 free(csebase_name);
                 free(app_name);
@@ -617,6 +654,7 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
@@ -653,11 +691,13 @@ void handle_request(int client_socket)
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
+            free(key);
             free(method);
             free(csebase_name);
             free(app_name);
             free(container_name);
             free(content_name);
+            free(subscription_name);
             return;
         }
     }
@@ -672,7 +712,9 @@ void handle_request(int client_socket)
     free(subscription_name);
     free(key);
 }
+#endif /* ENABLE_HTTP */
 
+#ifdef ENABLE_COAP
 void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const coap_pdu_t *request,const coap_string_t *query,coap_pdu_t *response)
 {
     struct response_params coap_params = {
@@ -865,6 +907,10 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
             free(body);
+            free(csebase_name);
+            free(app_name);
+            free(container_name);
+            free(content_name);
             return;
         }
 
@@ -918,6 +964,10 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
             free(body);
+            free(csebase_name);
+            free(app_name);
+            free(container_name);
+            free(content_name);
             return;
         }
         // Handle PUT request
@@ -959,6 +1009,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     free(container_name);
     free(content_name);
 }
+#endif /* ENABLE_COAP */
 
 // Function to delete expired resources
 void *check_and_delete_expired_resources(void *arg)
@@ -1109,6 +1160,7 @@ char *extract_json_key(const char *json) {
     return key;
 }
 
+#ifdef ENABLE_MQTT
 //MQTT callback functions
 void on_connect_callback(void* context) {
     LOG("[MQTT] Connected to MQTT broker");
@@ -1129,3 +1181,4 @@ void on_error_callback(void* context, int rc) {
         stop = 1;
     }
 }
+#endif /* ENABLE_MQTT */

@@ -1,2 +1,7 @@
 *Zone.Identifier
+.claude
+*.md
+*.txt
+*.idea
+*.sh
 

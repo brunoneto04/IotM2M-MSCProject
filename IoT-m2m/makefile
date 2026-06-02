@@ -3,6 +3,9 @@ CC = gcc
 
 # Compiler flags
 CFLAGS = -Iinclude -I/usr/include/x86_64-linux-gnu
+CFLAGS += -DENABLE_HTTP
+CFLAGS += -DENABLE_COAP
+CFLAGS += -DENABLE_MQTT
 
 # Set ENABLE_LOGGING=1 to enable logging during build, e.g. `make ENABLE_LOGGING=1`
 ENABLE_LOGGING ?= 0
