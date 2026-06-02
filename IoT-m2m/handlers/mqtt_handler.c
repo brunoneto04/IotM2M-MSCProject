@@ -19,18 +19,19 @@ valgrind --leak-check=yes ./iotm2m
 #include "mqtt_client.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>  
+#include <string.h>
+#include "logger.h"
 
 static void handle_request(const char* topic, const char* payload) {
     //Implementar lógica oneM2M para requisições
-    printf("Received request on topic: %s\n", topic);
-    printf("Payload: %s\n", payload);
+    LOG("Received request on topic: %s", topic);
+    LOG("Payload: %s", payload);
 }
 
 static void handle_response(const char* topic, const char* payload) {
     //Implementar lógica oneM2M para respostas
-    printf("Received response on topic: %s\n", topic);
-    printf("Payload: %s\n", payload);
+    LOG("Received response on topic: %s", topic);
+    LOG("Payload: %s", payload);
 }
 
 static int mqtt_message_arrived(void *context, char *topicName, int topicLen, MQTTClient_message *message) {

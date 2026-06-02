@@ -7,6 +7,12 @@ CFLAGS += -DENABLE_HTTP
 CFLAGS += -DENABLE_COAP
 CFLAGS += -DENABLE_MQTT
 
+# Set ENABLE_LOGGING=1 to enable logging during build, e.g. `make ENABLE_LOGGING=1`
+ENABLE_LOGGING ?= 0
+ifeq ($(ENABLE_LOGGING),1)
+CFLAGS += -DENABLE_LOGGING
+endif
+
 # Libraries
 LIBS = -L/usr/local/lib -lcoap-3 -lssl -lcrypto -lcurl -lpaho-mqtt3cs -lpaho-mqtt3c -ljson-c -lsqlite3 -lpthread
 
