@@ -23,7 +23,7 @@ void init_schedule_table(void) {
     
     int rc = sqlite3_open(DB_PATH, &db);
     if (rc != SQLITE_OK) {
-        LOG_ERR("Error: Could not open DB to initialize Schedules: %s", sqlite3_errmsg(db));
+        LOG_ERROR("Error: Could not open DB to initialize Schedules: %s", sqlite3_errmsg(db));
         return;
     }
 
@@ -40,7 +40,7 @@ void init_schedule_table(void) {
 
     rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
     if (rc != SQLITE_OK) {
-        LOG_ERR("SQL Error creating schedules table: %s", err_msg);
+        LOG_ERROR("SQL Error creating schedules table: %s", err_msg);
         sqlite3_free(err_msg);
     } else {
         LOG("[DB] 'schedules' table verified/initialized successfully.");
@@ -254,11 +254,14 @@ void handle_schedule_delete(struct response_params *params, const char *identifi
 // --- Background Scheduling logic (Phase 7.5) ---
 
 /*
- * check_and_trigger_actions() is defined by action module.
- * Replace the extern declaration below with the appropriate #include
- * once header is available.
+ * check_and_trigger_actions() will be defined by action module.
+ * The weak stub below allows linking without errors in the meantime.
+ * Once object file is linked in, the linker will automatically
+ * prefer his strong definition over this placeholder.
  */
-extern void check_and_trigger_actions(void);
+void __attribute__((weak)) check_and_trigger_actions(void) {
+    LOG("[Scheduler] check_and_trigger_actions() stub — action module not linked yet.");
+}
 
 static pthread_t       scheduler_tid;
 static pthread_mutex_t scheduler_mtx  = PTHREAD_MUTEX_INITIALIZER;
@@ -372,7 +375,7 @@ void start_scheduler_thread(void) {
     pthread_mutex_unlock(&scheduler_mtx);
 
     if (pthread_create(&scheduler_tid, NULL, scheduler_thread_func, NULL) != 0) {
-        LOG_ERR("[Scheduler] Failed to create background thread.");
+        LOG_ERROR("[Scheduler] Failed to create background thread.");
         pthread_mutex_lock(&scheduler_mtx);
         scheduler_active = 0;
         pthread_mutex_unlock(&scheduler_mtx);

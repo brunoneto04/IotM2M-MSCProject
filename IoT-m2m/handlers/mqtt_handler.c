@@ -23,13 +23,13 @@ valgrind --leak-check=yes ./iotm2m
 #include "logger.h"
 
 static void handle_request(const char* topic, const char* payload) {
-    //Implementar lógica oneM2M para requisições
+    // Implement oneM2M request logic
     LOG("Received request on topic: %s", topic);
     LOG("Payload: %s", payload);
 }
 
 static void handle_response(const char* topic, const char* payload) {
-    //Implementar lógica oneM2M para respostas
+    // Implement oneM2M response logic
     LOG("Received response on topic: %s", topic);
     LOG("Payload: %s", payload);
 }
@@ -42,7 +42,7 @@ static int mqtt_message_arrived(void *context, char *topicName, int topicLen, MQ
     strncpy(topic, topicName, topicLen);
     topic[topicLen] = '\0';
 
-    // Verificar tipo de mensagem oneM2M
+    // Check oneM2M message type
     if (strstr(topic, MQTT_REQ_TOPIC) != NULL) {
         handle_request(topic, payload);
     } else if (strstr(topic, MQTT_RESP_TOPIC) != NULL) {

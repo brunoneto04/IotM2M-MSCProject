@@ -24,7 +24,7 @@
 
 #define MQTT_TOPIC_FORMAT "/oneM2M/%s/%s/%s"  // prefix/type/originator/receiver
 
-// Tipos de mensagens
+// Message types
 #define MQTT_MSG_TYPE_REQ "req"
 #define MQTT_MSG_TYPE_RESP "resp"
 #define MQTT_MSG_TYPE_REG "reg"
@@ -51,7 +51,7 @@ typedef struct {
 } MQTTConnection;
 
 typedef struct {
-    //Configurações do Broker
+    // Broker settings
     char address[256];
     bool use_mqtt; 
     int port;
@@ -59,13 +59,13 @@ typedef struct {
     int timeout;
     bool enable;
     
-    //Configurações de Tópicos
+    // Topic settings
     char topic_prefix[128];
     char request_topic[256];
     char response_topic[256];
     char registration_topic[256];
     
-    // Segurança
+    // Security
     bool use_tls;
     bool verify_cert;
     char ca_file[256];
@@ -76,16 +76,16 @@ typedef struct {
     char allowed_credentials[MAX_CREDENTIALS][64];
     int allowed_cred_count;
     
-    //Identificação do Cliente
+    // Client identification
     char client_id[128];
     char entity_type;       // 'A' for AE, 'C' for CSE
     char entity_id[256];    // AE-ID or CSE-ID
     int protocol_version;   // MQTT protocol version (should be 4 for 3.1.1)
 } MQTTConfig;
 
-// Estrutura para mensagem oneM2M
+// oneM2M message structure
 typedef struct {
-    char op[32];     // Operação (CREATE, RETRIEVE, etc)
+    char op[32];     // Operation (CREATE, RETRIEVE, etc.)
     char fr[256];    // From (Originator)
     char to[256];    // To (Receiver)
     char rqi[64];    // Request Identifier

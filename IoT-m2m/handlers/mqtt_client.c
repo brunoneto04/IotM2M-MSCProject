@@ -54,11 +54,11 @@ bool mqtt_publish2(MQTTConnection *conn, const char *topic, const char *payload)
 {
     if (!conn || !conn->is_connected)
     {
-        printf("[ERRO] Conexão MQTT inválida\n");
+        printf("[ERROR] Invalid MQTT connection\n");
         return false;
     }
 
-    printf(" A Publicar no tópico: %s\n", topic);
+    printf(" Publishing to topic: %s\n", topic);
     printf("Payload: %s\n", payload);
 
     MQTTClient_message pubmsg = MQTTClient_message_initializer;
@@ -72,19 +72,19 @@ bool mqtt_publish2(MQTTConnection *conn, const char *topic, const char *payload)
 
     if (rc != MQTTCLIENT_SUCCESS)
     {
-        printf("[ERRO] Falha ao publicar: %s (código: %d)\n", MQTTClient_strerror(rc), rc);
+        printf("[ERROR] Publish failed: %s (code: %d)\n", MQTTClient_strerror(rc), rc);
         return false;
     }
 
-    // Aguarda confirmação de entrega
-    rc = MQTTClient_waitForCompletion(conn->client, token, 5000); // 5 segundos
+    // Wait for delivery confirmation
+    rc = MQTTClient_waitForCompletion(conn->client, token, 5000); // 5 seconds
     if (rc != MQTTCLIENT_SUCCESS)
     {
-        printf("[ERRO] Falha na entrega: %s (código: %d)\n", MQTTClient_strerror(rc), rc);
+        printf("[ERROR] Delivery failed: %s (code: %d)\n", MQTTClient_strerror(rc), rc);
         return false;
     }
 
-    printf("[SUCESSO] Mensagem publicada com sucesso no tópico: %s\n", topic);
+    printf("[OK] Message published successfully to topic: %s\n", topic);
     return true;
 }
 
@@ -93,7 +93,7 @@ MQTTConnection *mqtt_create_dynamic_connection(const char *address, int port, bo
     MQTTConnection *conn = calloc(1, sizeof(MQTTConnection));
     if (!conn)
     {
-        printf("[ERRO] Falha ao alocar memória para a conexão MQTT\n");
+        printf("[ERROR] Failed to allocate memory for MQTT connection\n");
         return NULL;
     }
 
@@ -102,26 +102,26 @@ MQTTConnection *mqtt_create_dynamic_connection(const char *address, int port, bo
     snprintf(uri, sizeof(uri), "%s://%s:%d",
             use_tls ? "ssl" : "tcp", address, port);
 
-    printf("  Criar cliente MQTT com URI: %s\n", uri);
+    printf("  Creating MQTT client with URI: %s\n", uri);
 
     // Criar cliente
     int rc = MQTTClient_create(&conn->client, uri, "iotm2m-notifier",
                     MQTTCLIENT_PERSISTENCE_NONE, NULL);
     if (rc != MQTTCLIENT_SUCCESS) {
-        printf("[ERRO] Falha ao criar cliente MQTT: %s (código: %d)\n", MQTTClient_strerror(rc), rc);
+        printf("[ERROR] Failed to create MQTT client: %s (code: %d)\n", MQTTClient_strerror(rc), rc);
         free(conn);
         return NULL;
     }
 
-    // Inicializar estrutura de conexão corretamente
+    // Initialise connection struct
     conn->conn_opts = (MQTTClient_connectOptions)MQTTClient_connectOptions_initializer;
     
-    // Configurações básicas
+    // Basic settings
     conn->conn_opts.keepAliveInterval = 60;
     conn->conn_opts.cleansession = 1;
     conn->conn_opts.connectTimeout = 30;
 
-    // Configurar TLS se necessário
+    // Configure TLS if needed
     if (use_tls)
     {
         
@@ -176,50 +176,50 @@ bool mqtt_connect2(MQTTConnection *conn)
 {
     if (!conn || !conn->client)
     {
-        printf("[ERRO] Conexão MQTT inválida\n");
+        printf("[ERROR] Invalid MQTT connection\n");
         return false;
     }
 
-    printf("A Tentar estabelecer conexão ao broker MQTT...\n");
+    printf("Connecting to MQTT broker...\n");
 
     int rc = MQTTClient_connect(conn->client, &conn->conn_opts);
     
     if (rc != MQTTCLIENT_SUCCESS)
     {
-        printf("[ERRO] Falha na conexão MQTT: %s (código: %d)\n", MQTTClient_strerror(rc), rc);
+        printf("[ERROR] MQTT connection failed: %s (code: %d)\n", MQTTClient_strerror(rc), rc);
         
-        // Diagnóstico adicional
+        // Additional diagnostics
         switch(rc)
         {
             case MQTTCLIENT_FAILURE:
-                printf("[ERRO] Falha geral na conexão\n");
+                printf("[ERROR] General connection failure\n");
                 break;
             case MQTTCLIENT_DISCONNECTED:
-                printf("[ERRO] Cliente desconectado\n");
+                printf("[ERROR] Client disconnected\n");
                 break;
             case MQTTCLIENT_MAX_MESSAGES_INFLIGHT:
-                printf("[ERRO] Demasiado tráfego\n");
+                printf("[ERROR] Too many in-flight messages\n");
                 break;
             case MQTTCLIENT_BAD_UTF8_STRING:
-                printf("[ERRO] String UTF8 inválida\n");
+                printf("[ERROR] Invalid UTF-8 string\n");
                 break;
             case MQTTCLIENT_NULL_PARAMETER:
-                printf("[ERRO] Parâmetro inexistente\n");
+                printf("[ERROR] Null parameter\n");
                 break;
             case MQTTCLIENT_TOPICNAME_TRUNCATED:
-                printf("[ERRO] Erro associado ao Nome do tópico\n");
+                printf("[ERROR] Topic name error\n");
                 break;
             case MQTTCLIENT_BAD_STRUCTURE:
-                printf("[ERRO] Estrutura inválida\n");
+                printf("[ERROR] Invalid structure\n");
                 break;
             case MQTTCLIENT_BAD_QOS:
-                printf("[ERRO] QoS inválido\n");
+                printf("[ERROR] Invalid QoS\n");
                 break;
             case MQTTCLIENT_SSL_NOT_SUPPORTED:
-                printf("[ERRO] SSL não suportado\n");
+                printf("[ERROR] SSL not supported\n");
                 break;
             default:
-                printf("[ERRO] Código de erro desconhecido: %d\n", rc);
+                printf("[ERROR] Unknown error code: %d\n", rc);
                 break;
         }
         
@@ -228,7 +228,7 @@ bool mqtt_connect2(MQTTConnection *conn)
     }
 
     conn->is_connected = true;
-    printf("[SUCESSO] Conectado ao broker MQTT\n");
+    printf("[OK] Connected to MQTT broker\n");
     return true;
 }
 
@@ -239,7 +239,7 @@ void mqtt_cleanup2(MQTTConnection *conn)
 
     if (conn->client && conn->is_connected)
     {
-        printf("A Desconectar do broker MQTT...\n");
+        printf("Disconnecting from MQTT broker...\n");
         MQTTClient_disconnect(conn->client, 1000);
     }
 
@@ -248,14 +248,14 @@ void mqtt_cleanup2(MQTTConnection *conn)
         MQTTClient_destroy(&conn->client);
     }
 
-    // Limpar strings SSL se foram alocadas dinamicamente
+    // Free SSL strings if dynamically allocated
     if (conn->conn_opts.ssl)
     {
      
     }
 
     free(conn);
-    printf("Conexão MQTT limpa\n");
+    printf("MQTT connection cleaned up\n");
 }
 
 

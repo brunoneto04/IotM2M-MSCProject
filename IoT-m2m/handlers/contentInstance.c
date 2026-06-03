@@ -419,7 +419,7 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     rc = sqlite3_open(DB_PATH, &db);
     if (rc != SQLITE_OK)
     {
-        LOG_ERR("Cannot open database: %s", sqlite3_errmsg(db));
+        LOG_ERROR("Cannot open database: %s", sqlite3_errmsg(db));
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
         {
             snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
@@ -1049,8 +1049,8 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     // Begin transaction
     sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
 
-    // Enquanto o currentNrOfInstances cni >= maxNrOfInstances mni, vai apagando content instances mais antigos
-    // Enquanto o (currentByteSize cbs + contentSize cs) > maxByteSize mbs, vai apagando content instances mais antigos até o (currentByteSize cbs + contentSize cs) <= maxByteSize mbs
+    // As long as currentNrOfInstances cni >= maxNrOfInstances mni, delete the oldest content instances
+    // While (currentByteSize + contentSize) > maxByteSize, delete oldest content instances until it fits
     // currentNrOfInstances cni++
     // currentByteSize cbs += contentSize cs
 
