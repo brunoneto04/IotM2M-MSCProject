@@ -38,7 +38,7 @@ typedef struct {
     char *payload;
 } http_args_t;
 
-//variáveis estáticas para armazenar o conteúdo e URI da última notificação, evitando duplicações de notificações
+//static variables to store the last notification content and URI, avoiding duplicate notifications
 static char last_notification_content[1024] = "";
 static char last_notification_uri[512] = "";
 static time_t last_notification_time = 0;
@@ -94,7 +94,7 @@ bool get_cse_id_from_parent(const char *parent_uri, char *cse_id, size_t size)
     }
     else
     {
-        fprintf(stderr, "CSE não encontrada para RN: %s\n", root_rn);
+        fprintf(stderr, "CSE not found for RN: %s\n", root_rn);
     }
 
     sqlite3_finalize(stmt);
@@ -173,7 +173,7 @@ bool create_subscription(const Subscription *sub)
     return rc == SQLITE_DONE;
 }
 
-//Estrutura para gerar Request Identifier único
+//Structure for generating a unique Request Identifier
 static char* generate_request_id() {
     static char rqi[32];
     struct timeval tv;
@@ -183,7 +183,7 @@ static char* generate_request_id() {
     return rqi;
 }
 
-//Função para gerar timestamp oneM2M
+//Function to generate oneM2M timestamp
 static void generate_onem2m_timestamp(char* buffer, size_t size) {
     time_t now = time(NULL);
     struct tm* utc_tm = gmtime(&now);
@@ -197,13 +197,13 @@ static void generate_onem2m_timestamp(char* buffer, size_t size) {
 }
 
 
-//Função auxiliar para calcular tamanho do conteúdo em bytes
+//Helper function to calculate content size in bytes
 static int calculate_content_size(const char *content) {
     if (!content) return 0;
     return strlen(content);
 }
 
-//Função auxiliar para obter dados atualizados do recurso da BD
+//Helper function to retrieve updated resource data from the database
 static json_object* get_resource_data_from_db(const char *resource_uri, int event_type, sqlite3 *db) {
     json_object *resource_data = NULL;
     
@@ -226,7 +226,7 @@ static json_object* get_resource_data_from_db(const char *resource_uri, int even
     sqlite3_stmt *stmt = NULL;
     
     if (cin_name) {
-        // É uma ContentInstance
+        // It is a ContentInstance
         const char *sql =
             "SELECT "
             "  r.ri, r.rn, r.pi, r.ct, r.lt, "
@@ -376,7 +376,7 @@ static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_s
     const char *prefix_mqtt = "mqtt://";
     const char *prefix_mqtts = "mqtts://";
 
-    //Verificar primeiro o MQTTS (mais específico do que quando se tem apenas MQTT)
+    //Check for MQTTS first (more specific than plain MQTT)
     if (strncmp(uri, prefix_mqtts, strlen(prefix_mqtts)) == 0)
     {
         uri += strlen(prefix_mqtts);
@@ -390,7 +390,7 @@ static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_s
     else
     {
         printf("[MQTT] Nenhum prefixo detetado, assumindo MQTT sem TLS\n");
-        // Se não tem prefixo, assumir MQTT sem TLS
+        // No prefix — assume MQTT without TLS
         *use_tls = false;
     }
 
@@ -398,7 +398,7 @@ static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_s
     while (*uri == '/')
         uri++;
 
-    // Encontrar o fim do subscriber_id (antes da próxima barra ou fim da string)
+    // Find the end of subscriber_id (before next slash or end of string)
     const char *end = strchr(uri, '/');
     size_t len = end ? (end - uri) : strlen(uri);
 
@@ -408,14 +408,14 @@ static void extract_subscriber_id(const char *uri, char *buffer, size_t buffer_s
     strncpy(buffer, uri, len);
     buffer[len] = '\0';
 
-    printf("[MQTT] TLS habilitado: %s\n", *use_tls ? "SIM" : "NÃO");
+    printf("[MQTT] TLS enabled: %s\n", *use_tls ? "YES" : "NO");
 }
 #endif /* ENABLE_MQTT */
 
 static bool should_notify_for_event(const char *subscription_event_types, int actual_event_type, const char *resource_uri, const char *subscription_uri)
 {
 
-    // Verificar se o evento atual está na lista de eventos subscritos
+    // Check if the current event is in the subscribed event list
     char *event_list = strdup(subscription_event_types);
     char *token = strtok(event_list, ",");
     bool event_match = false;
@@ -438,7 +438,7 @@ static bool should_notify_for_event(const char *subscription_event_types, int ac
         return false;
     }
 
-    // Normalizar ambas as URIs antes da comparação
+    // Normalise both URIs before comparison
     char normalized_resource[512];
     char normalized_subscription[512];
 
@@ -448,20 +448,20 @@ static bool should_notify_for_event(const char *subscription_event_types, int ac
     switch (actual_event_type)
     {
     case 1: // Update_of_Resource
-            // Notificar se o recurso atualizado é exatamente o subscrito
+            // Notify if the updated resource is exactly the subscribed one
         return (strcmp(normalized_resource, normalized_subscription) == 0);
 
     case 2: // Delete_of_Resource
-        // Notificar se o recurso deletado é exatamente o subscrito
+        // Notify if the deleted resource is exactly the subscribed one
         bool match = (strcmp(normalized_resource, normalized_subscription) == 0);
         return match;
 
     case 3: // Create_of_Direct_Child_Resource
-        // Notificar se o recurso criado é filho direto do subscrito
+        // Notify if the created resource is a direct child of the subscribed one
         return is_direct_child(normalized_resource, normalized_subscription);
 
     //case 4: // Delete_of_Direct_Child_Resource
-        // Notificar se o recurso deletado é filho direto do subscrito
+        // Notify if the deleted resource is a direct child of the subscribed one
         //return is_direct_child(normalized_resource, normalized_subscription);
 
     default:
@@ -473,7 +473,7 @@ static char* get_ri_from_resource_uri(const char *resource_uri, sqlite3 *db) {
     static char ri[128] = "";
     if (!resource_uri || !db) return NULL;
 
-    // Extrair último segmento da URI (pode ser rn ou ri)
+    // Extract last URI segment (may be rn or ri)
     const char *last_slash = strrchr(resource_uri, '/');
     const char *name = last_slash ? last_slash + 1 : resource_uri;
 
@@ -494,8 +494,7 @@ static char* get_ri_from_resource_uri(const char *resource_uri, sqlite3 *db) {
 
 static bool is_direct_child(const char *child_uri, const char *parent_uri) 
 {
-    printf("A Verificar se '%s' é filho direto de '%s'\n", child_uri, parent_uri);
-    
+    printf("Checking if child '%s' is direct child of parent '%s'\n", child_uri, parent_uri);
     if (!child_uri || !parent_uri) {
         return false;
     }
@@ -517,7 +516,7 @@ static bool is_direct_child(const char *child_uri, const char *parent_uri)
         clean_child[len-1] = '\0';
     }
     
-    // Verificar se child começa com parent + "/"
+    // Check if child starts with parent + "/"
     char expected_prefix[612];
     snprintf(expected_prefix, sizeof(expected_prefix), "%s/", clean_parent);
     
@@ -525,7 +524,7 @@ static bool is_direct_child(const char *child_uri, const char *parent_uri)
         return false;
     }
     
-    // Verificar se é filho DIRETO (não tem mais "/" depois do parent)
+    // Check if it is a DIRECT child (no extra "/" after parent)
     const char *remaining = clean_child + strlen(expected_prefix);
     bool is_direct = strchr(remaining, '/') == NULL && strlen(remaining) > 0;
     return is_direct;
@@ -545,7 +544,7 @@ static void normalize_uri(const char *uri, char *normalized, size_t size)
         normalized[len - 1] = '\0';
     }
     
-    // Garantir que começa com "/"
+    // Ensure it starts with "/"
     if (normalized[0] != '/') {
         char temp[512];
         snprintf(temp, sizeof(temp), "/%s", normalized);
@@ -557,7 +556,7 @@ static void normalize_uri(const char *uri, char *normalized, size_t size)
 #ifdef ENABLE_MQTT
 void handle_mqtt_notification(const char *resource_uri, const char *content, int event_type)
 {
-    // Verificar se a notificação é duplicada (manter como está)
+    // Check for duplicate notification
     time_t current_time = time(NULL);
     if (strcmp(content, last_notification_content) == 0 &&
         strcmp(resource_uri, last_notification_uri) == 0 &&
@@ -566,14 +565,14 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         return;
     }
     
-    // Atualizar cache (manter como está)
+    // Update notification cache
     strncpy(last_notification_content, content, sizeof(last_notification_content) - 1);
     last_notification_content[sizeof(last_notification_content) - 1] = '\0';
     strncpy(last_notification_uri, resource_uri, sizeof(last_notification_uri) - 1);
     last_notification_uri[sizeof(last_notification_uri) - 1] = '\0';
     last_notification_time = current_time;
 
-    // Código de abertura DB e loop (manter como está até o ponto onde constrói o payload)
+    // Open DB and iterate subscriptions
     sqlite3 *db;
     sqlite3_stmt *stmt;
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK)
@@ -619,13 +618,13 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         strncpy(sub.creation_time, (const char *)sqlite3_column_text(stmt, 8), sizeof(sub.creation_time) - 1);
         strncpy(sub.last_modified_time, (const char *)sqlite3_column_text(stmt, 9), sizeof(sub.last_modified_time) - 1);
 
-        // Verificar se deve notificar (manter como está)
+        // Check whether to notify
         if (!should_notify_for_event(sub.event_type_str, event_type, resource_uri, sub.resource_uri)) {
-            printf("[SUB] A Subscription %s NÃO deve ser notificada para este tipo de evento\n", sub.resource_name);
+            printf("[SUB] Subscription %s should NOT be notified for this event type\n", sub.resource_name);
             continue;
         }
 
-        printf("[SUB] A Enviar NOTIFICAÇÃO para a subscription %s \n", sub.resource_name);
+        printf("[SUB] Sending NOTIFICATION for subscription %s \n", sub.resource_name);
         notifications_sent++;
 
         char cse_id[64];
@@ -633,7 +632,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             continue;
         }
 
-        // Extrair subscriber info (manter como está)
+        // Extract subscriber info
         char subscriber_id[256];
         bool use_tls = false;
         MQTTURIInfo uri_info;
@@ -643,7 +642,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         strncpy(formatted_cse_id, cse_id, sizeof(formatted_cse_id) - 1);
         formatted_cse_id[sizeof(formatted_cse_id) - 1] = '\0';
         
-        // Formatar CSE ID (manter como está)
+        // Format CSE ID
         for (char *p = formatted_cse_id; *p; p++)
         {
             if (*p == '\\') *p = '/';
@@ -653,10 +652,10 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             memmove(formatted_cse_id, formatted_cse_id + 1, strlen(formatted_cse_id));
         }
         
-        // 1. Criar estrutura principal da notificação oneM2M
+        // 1. Build main oneM2M notification structure
         json_object *notification = json_object_new_object();
         
-        // 2. Campos obrigatórios do cabeçalho oneM2M - **CORRIGIDO: adicionar barra inicial**
+        // 2. Mandatory oneM2M header fields
         char fr_with_slash[128];
         snprintf(fr_with_slash, sizeof(fr_with_slash), "/%s", formatted_cse_id);
         json_object_object_add(notification, "fr", json_object_new_string(fr_with_slash));
@@ -667,7 +666,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         generate_onem2m_timestamp(timestamp, sizeof(timestamp));
         json_object_object_add(notification, "ot", json_object_new_string(timestamp));
         
-        // 4. Campos obrigatórios
+        // 4. Mandatory fields
         json_object_object_add(notification, "op", json_object_new_int(5)); // NOTIFY operation
         json_object_object_add(notification, "rqi", json_object_new_string(generate_request_id()));
         json_object_object_add(notification, "rvi", json_object_new_string("3")); // oneM2M release version 3
@@ -684,7 +683,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         
         int effective_nct = sub.notification_type;
 
-        // 7. Regras específicas por tipo de evento
+        // 7. Event-type-specific rules
         switch (event_type)
         {
         case 2: // Delete - sempre nct=3
@@ -712,7 +711,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             if (!added) {
                 // Fallback: se for update de container, envia m2m:cnt null
                 if (event_type == 1 && strstr(resource_uri, "/") && strrchr(resource_uri, '/') == strchr(resource_uri, '/')) {
-                    // Provavelmente é um container
+                    // Likely a container
                     json_object_object_add(rep, "m2m:cnt", NULL);
                 } else {
                     // Fallback para contentInstance
@@ -759,7 +758,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
                 if (content_obj) json_object_put(content_obj);
             }
             if (!added) {
-                // Se não há atributos modificados, envia sempre a notificação com null
+                // If no modified attributes, send notification with null
                 json_object_object_add(rep, "m2m:cnt", NULL);
             }
         }
@@ -769,7 +768,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             if (ri && strlen(ri) > 0) {
                 json_object_object_add(rep, "m2m:uri", json_object_new_string(ri));
             } else {
-                // fallback para o nome, se não encontrar
+                // fallback to name if RI not found
                 const char *last_slash = strrchr(resource_uri, '/');
                 const char *resource_id = last_slash ? last_slash + 1 : resource_uri;
                 json_object_object_add(rep, "m2m:uri", json_object_new_string(resource_id));
@@ -810,7 +809,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         
             pthread_t tid;
             if (pthread_create(&tid, NULL, send_http_notification_thread, args) != 0) {
-                printf("[ERRO] Falha ao criar thread para notificação HTTP\n");
+                printf("[ERROR] Failed to create thread for HTTP notification\n");
                 free(args->url);
                 free(args->payload);
                 free(args);
@@ -822,7 +821,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             continue; // Skip MQTT
         }
 
-        // O resto do código MQTT permanece igual...
+        // Remaining MQTT code follows
         MQTTConnection *notification_conn = NULL;
         
         if (uri_info.is_full_uri) {
@@ -832,7 +831,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         }
         
         if (!notification_conn) {
-            printf("[ERRO] Falha ao criar conexão MQTT%s para %s:%d\n", 
+            printf("[ERROR] Failed to create MQTT%s connection to %s:%d\n", 
                    use_tls ? "S" : "", 
                    uri_info.is_full_uri ? uri_info.host : "localhost",
                    uri_info.is_full_uri ? uri_info.port : (use_tls ? 8883 : 1883));
@@ -841,7 +840,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         }
         
         if (!mqtt_connect2(notification_conn)) {
-            printf("[ERRO] Falha na conexão MQTT%s para %s:%d\n", 
+            printf("[ERROR] MQTT%s connection failed for %s:%d\n", 
                    use_tls ? "S" : "",
                    uri_info.is_full_uri ? uri_info.host : "localhost",
                    uri_info.is_full_uri ? uri_info.port : (use_tls ? 8883 : 1883));
@@ -858,29 +857,29 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
             int result = snprintf(full_topic, sizeof(full_topic), "/oneM2M/req/%s/%s/json", 
                                 formatted_cse_id, uri_info.topic);
             if (result >= sizeof(full_topic)) {
-                printf("[ERRO] Tópico MQTT não suportado: %s\n", full_topic);
+                printf("[ERROR] Unsupported MQTT topic: %s\n", full_topic);
                 json_object_put(notification);
                 mqtt_cleanup2(notification_conn);
                 continue;
             }
         }
         
-        printf("[MQTT] Tópico MQTT construído: %s\n", full_topic);
-        printf("[MQTT] A estabelecer conexão a %s:%d (TLS: %s)\n", 
+        printf("[MQTT] MQTT topic built: %s\n", full_topic);
+        printf("[MQTT] Connecting to %s:%d (TLS: %s)\n", 
                uri_info.is_full_uri ? uri_info.host : "localhost",
                uri_info.is_full_uri ? uri_info.port : (use_tls ? 8883 : 1883),
-               uri_info.use_tls ? "sim" : "não");
+               uri_info.use_tls ? "yes" : "no");
         
         bool success = mqtt_publish2(notification_conn, full_topic, payload);
         mqtt_cleanup2(notification_conn);
         
         if (success) {
-            printf("[MQTT] Notificação #%d enviada com sucesso via %s para %s:%d! ***\n", 
+            printf("[MQTT] Notification #%d sent successfully via %s to %s:%d ***\n", 
                    notifications_sent, uri_info.use_tls ? "MQTTS" : "MQTT", 
                    uri_info.is_full_uri ? uri_info.host : "localhost",
                    uri_info.is_full_uri ? uri_info.port : (use_tls ? 8883 : 1883));
         } else {
-            printf("[MQTT] Falha ao enviar notificação via %s para %s:%d!\n", 
+            printf("[MQTT] Failed to send notification via %s to %s:%d!\n", 
                    uri_info.use_tls ? "MQTTS" : "MQTT", 
                    uri_info.is_full_uri ? uri_info.host : "localhost",
                    uri_info.is_full_uri ? uri_info.port : (use_tls ? 8883 : 1883));
@@ -889,7 +888,7 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         json_object_put(notification);
     }
     
-    printf("[MQTT] Total de subscriptions verificadas: %d, notificações enviadas: %d\n", 
+    printf("[MQTT] Total subscriptions checked: %d, notifications sent: %d\n", 
            subscription_count, notifications_sent);
     
     sqlite3_finalize(stmt);
@@ -897,40 +896,40 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
 }
 #endif /* ENABLE_MQTT */
 
-// Função para extrair conteúdo real de um JSON
+// Function to extract actual content from a JSON wrapper
 static json_object *extract_content_from_json(const char *content)
 {
     if (!content) {
         return json_object_new_string("");
     }
 
-    // Tenta parsear o conteúdo como JSON
+    // Attempt to parse content as JSON
     json_object *parsed = json_tokener_parse(content);
     if (!parsed)
     {
-        // Se não é JSON válido, retorna como string simples
+        // If not valid JSON, return as plain string
         return json_object_new_string(content);
     }
 
-    // Se é um wrapper m2m:cin, extrai o conteúdo interno
+    // If it is an m2m:cin wrapper, extract inner content
     json_object *cin_obj;
     if (json_object_object_get_ex(parsed, "m2m:cin", &cin_obj))
     {
         json_object *con_obj;
         if (json_object_object_get_ex(cin_obj, "con", &con_obj))
         {
-            // Incrementa referência para não ser liberado quando parsed for liberado
+            // Increment ref so it is not freed when parsed is freed
             json_object_get(con_obj);
             json_object_put(parsed);
             return con_obj;
         }
-        // Se não tem "con", retorna o objeto cin completo
+        // Se no tem "con", retorna o objeto cin completo
         json_object_get(cin_obj);
         json_object_put(parsed);
         return cin_obj;
     }
 
-    // Se não é um wrapper, retorna o objeto completo
+    // If not a wrapper, return the full object
     return parsed;
 }
 
@@ -991,13 +990,13 @@ bool handle_subscription_request(const char *request_json, const char *resource_
         return false;
     }
 
-    // Gera um ri único para a subscription
+    // Generate a unique ri for the subscription
     snprintf(sub.resource_id, sizeof(sub.resource_id), "sub%lld", (long long)time(NULL) * 1000000LL + rand() % 1000000);
 
     // Set parent ID from resource URI
     // Antes de criar a subscription:
     char parent_ri[128] = "";
-    get_ri_from_resource_uri_aux(resource_uri, NULL, parent_ri, sizeof(parent_ri)); // Nova função, ver abaixo
+    get_ri_from_resource_uri_aux(resource_uri, NULL, parent_ri, sizeof(parent_ri)); // new helper, see below
     strncpy(sub.parent_id, parent_ri, sizeof(sub.parent_id) - 1);
     strncpy(sub.resource_uri, resource_uri, sizeof(sub.resource_uri) - 1);
 
@@ -1018,7 +1017,7 @@ bool handle_subscription_request(const char *request_json, const char *resource_
         return false;
     }
 
-    // Get notification content type (nct) - PADRÃO 1 se não especificado
+    // Get notification content type (nct) - DEFAULT 1 se not specified
     json_object *nct;
     if (json_object_object_get_ex(sub_obj, "nct", &nct))
     {
@@ -1026,8 +1025,8 @@ bool handle_subscription_request(const char *request_json, const char *resource_
     }
     else
     {
-        sub.notification_type = 1; // PADRÃO: All Attributes
-        printf("[SUB] NCT não especificado, utilizando o padrão: 1 (All Attributes)\n");
+        sub.notification_type = 1; // DEFAULT: All Attributes
+        printf("[SUB] NCT not specified, utilizando default: 1 (All Attributes)\n");
     }
 
     // Get event notification criteria (enc)
@@ -1041,12 +1040,12 @@ bool handle_subscription_request(const char *request_json, const char *resource_
             char event_types[256] = {0};
             int array_len = json_object_array_length(net);
 
-            // VALIDAÇÃO: Verificar combinações incompatíveis nct/net
+            // VALIDATION: Check incompatible nct/net combinations
             for (int i = 0; i < array_len; i++)
             {
                 int event_val = json_object_get_int(json_object_array_get_idx(net, i));
 
-                // Validar usando a função corrigida
+                // Validate using corrected function
                 if (!is_valid_nct_net_combination(sub.notification_type, event_val))
                 {
                     snprintf(response, response_size,
@@ -1115,7 +1114,7 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
     
     memset(info, 0, sizeof(MQTTURIInfo));
     
-    // Verificar se é formato completo mqtt://host:port/topic ou mqtts://host:port/topic
+    // Check for full URI format mqtt://host:port/topic or mqtts://host:port/topic
     if (strncmp(uri, "mqtts://", 8) == 0) {
         info->use_tls = true;
         info->is_full_uri = true;
@@ -1123,13 +1122,13 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
     } else if (strncmp(uri, "mqtt://", 7) == 0) {
         const char *after_prefix = uri + 7;
         
-        // CORREÇÃO: Verificar se realmente tem host:port ou apenas tópico
-        // Se tem ':' seguido por números E '/', é formato completo
+        // FIX: Check whether it actually has host:port or just a topic
+        // If it has .* followed by digits AND .*, it is the full format
         const char *colon = strchr(after_prefix, ':');
         const char *slash = strchr(after_prefix, '/');
         
         if (colon && slash && colon < slash) {
-            // Verificar se entre ':' e '/' são apenas dígitos (porta)
+            // Check if chars between .* and .* are all digits (port number)
             bool is_port = true;
             for (const char *p = colon + 1; p < slash; p++) {
                 if (!isdigit(*p)) {
@@ -1139,19 +1138,19 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
             }
             
             if (is_port) {
-                // É formato completo: mqtt://host:port/topic
+                // Full format: mqtt://host:port/topic
                 info->use_tls = false;
                 info->is_full_uri = true;
                 uri += 7; // Pula "mqtt://"
             } else {
-                // É formato simples com ':' no tópico
+                // Simple format with ':' in topic
                 info->is_full_uri = false;
                 info->use_tls = false;
                 strcpy(info->host, "localhost");
                 info->port = 1883;
                 strncpy(info->topic, after_prefix, sizeof(info->topic) - 1);
                 info->topic[sizeof(info->topic) - 1] = '\0';
-                printf("[MQTT] Formato simples com ':' no tópico - Host: %s, Port: %d, Topic: %s\n", 
+                printf("[MQTT] Simple format com ':' no topic - Host: %s, Port: %d, Topic: %s\n", 
                        info->host, info->port, info->topic);
                 return true;
             }
@@ -1161,7 +1160,7 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
             info->is_full_uri = true;
             uri += 7; // Pula "mqtt://"
         } else {
-            // Formato simples - apenas tópico
+            // Simple format - apenas topic
             info->is_full_uri = false;
             info->use_tls = false;
             strcpy(info->host, "localhost");
@@ -1175,7 +1174,7 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
         info->is_full_uri = true;
         uri += 7; // Salta o "http://"
     } else {
-        // Sem prefixo - assumir formato simples
+        // Sem prefixo - assumir formato simple
         info->is_full_uri = false;
         info->use_tls = false;
         strcpy(info->host, "localhost");
@@ -1192,7 +1191,7 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
         return false;
     }
     
-    // Extrair tópico (tudo após a primeira barra)
+    // Extract topic (everything after the first slash)
     strncpy(info->topic, slash, sizeof(info->topic) - 1);
     info->topic[sizeof(info->topic) - 1] = '\0';
     
@@ -1219,11 +1218,11 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
         
         // Validar porta
         if (info->port <= 0 || info->port > 65535) {
-            printf("[ERRO] Porta inválida: %d\n", info->port);
+            printf("[ERROR] Invalid port: %d\n", info->port);
             return false;
         }
     } else {
-        // Sem porta especificada, usar host completo e porta padrão
+        // No port specified — use full host and default port
         size_t host_len = slash - uri;
         if (host_len >= sizeof(info->host)) {
             host_len = sizeof(info->host) - 1;
@@ -1231,14 +1230,14 @@ static bool parse_mqtt_uri_enhanced(const char *uri, MQTTURIInfo *info) {
         strncpy(info->host, uri, host_len);
         info->host[host_len] = '\0';
         
-        // Porta padrão baseada no protocolo
+        // Default port based on protocol
         info->port = info->use_tls ? 8883 : 1883;
     }
     
     return true;
 }
 
-// Função aprimorada para parsear URIs MQTT completas ou simples
+// Enhanced function to parse full or simple MQTT URIs
 static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
 {
     if (!uri || !info) {
@@ -1247,7 +1246,7 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
     
     memset(info, 0, sizeof(MQTTURIInfo));
     
-    // Verificar se é formato completo mqtt://host:port/topic ou mqtts://host:port/topic
+    // Check for full URI format mqtt://host:port/topic or mqtts://host:port/topic
     if (strncmp(uri, "mqtts://", 8) == 0) {
         info->use_tls = true;
         info->is_full_uri = true;
@@ -1257,7 +1256,7 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
         info->is_full_uri = true;
         uri += 7; // Pula "mqtt://"
     } else {
-        // Formato simples - apenas tópico (comportamento atual)
+        // Simple format - apenas topic (current behaviour)
         info->is_full_uri = false;
         info->use_tls = false;
         strcpy(info->host, "localhost"); // Default
@@ -1271,11 +1270,11 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
     // Parsear formato completo: host:port/topic
     const char *slash = strchr(uri, '/');
     if (!slash) {
-        printf("[MQTT] URI MQTT inválida - falta tópico: %s\n", uri);
+        printf("[MQTT] Invalid MQTT URI — missing topic: %s\n", uri);
         return false;
     }
     
-    // Extrair tópico (tudo após a primeira barra)
+    // Extract topic (everything after the first slash)
     strncpy(info->topic, slash, sizeof(info->topic) - 1);
     info->topic[sizeof(info->topic) - 1] = '\0';
     
@@ -1300,7 +1299,7 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
         port_str[port_len] = '\0';
         info->port = atoi(port_str);
     } else {
-        // Sem porta especificada, usar host completo e porta padrão
+        // No port specified — use full host and default port
         size_t host_len = slash - uri;
         if (host_len >= sizeof(info->host)) {
             host_len = sizeof(info->host) - 1;
@@ -1308,36 +1307,36 @@ static bool parse_mqtt_uri(const char *uri, MQTTURIInfo *info)
         strncpy(info->host, uri, host_len);
         info->host[host_len] = '\0';
         
-        // Porta padrão baseada no protocolo
+        // Default port based on protocol
         info->port = info->use_tls ? 8883 : 1883;
     }
     
-    printf("[MQTT] URI completa - Host: %s, Port: %d, TLS: %s, Topic: %s\n",info->host, info->port, info->use_tls ? "sim" : "não", info->topic);
+    printf("[MQTT] Full URI — Host: %s, Port: %d, TLS: %s, Topic: %s\n",info->host, info->port, info->use_tls ? "yes" : "no", info->topic);
 
     return true;
 }
 #endif /* ENABLE_MQTT */
 
-// Função para validar combinações nct/net
+// Function to validate nct/net combinations
 static bool is_valid_nct_net_combination(int nct, int net) {
 
-    // nct=2 (Modified Attributes) só faz sentido em Updates (net=1)
+    // nct=2 (Modified Attributes) only makes sense for Updates (net=1)
     if (nct == 2 && net != 1) {
         return false;
     }
-    // nct=1 (All Attributes) não é permitido para net=2 (Delete)
+    // nct=1 (All Attributes) is not allowed for net=2 (Delete)
     if (nct == 1 && net == 2) {
         return false;
     }
-    // nct=3 (ResourceID) é o único permitido para net=2 (Delete)
+    // nct=3 (ResourceID) is the only option allowed for net=2 (Delete)
     if (net == 2 && nct != 3) {
         return false;
     }
-    // nct=3 (ResourceID) só em casos reconhecidos (net=1,2,3)
+    // nct=3 (ResourceID) only in recognised cases (net=1,2,3)
     if (nct == 3 && net != 1 && net != 2 && net != 3) {
         return false;
     }
-    // nct=1 (All Attributes) só em casos reconhecidos (net=1,3)
+    // nct=1 (All Attributes) only in recognised cases (net=1,3)
     if (nct == 1 && net != 1 && net != 3) {
         return false;
     }
@@ -1354,13 +1353,13 @@ static void extract_subscriber_id_enhanced(const char *uri, char *buffer, size_t
     // Inicializar estrutura
     memset(uri_info, 0, sizeof(MQTTURIInfo));
     
-    // Verificar se é mqtts://subscriber_id ou mqtt://subscriber_id (formato simples)
+    // Check for mqtts://subscriber_id or mqtt://subscriber_id (simple format)
     if (strncmp(uri, "mqtts://", 8) == 0) {
         const char *subscriber_part = uri + 8;
         
         // Verificar se tem formato host:port/topic ou apenas subscriber_id
         if (!strchr(subscriber_part, '/') && !strchr(subscriber_part, ':')) {
-            // Formato simples: mqtts://subscriber_id
+            // Simple format: mqtts://subscriber_id
             *use_tls = true;
             uri_info->use_tls = true;
             uri_info->is_full_uri = false;
@@ -1378,7 +1377,7 @@ static void extract_subscriber_id_enhanced(const char *uri, char *buffer, size_t
         
         // Verificar se tem formato host:port/topic ou apenas subscriber_id
         if (!strchr(subscriber_part, '/') && !strchr(subscriber_part, ':')) {
-            // Formato simples: mqtt://subscriber_id
+            // Simple format: mqtt://subscriber_id
             *use_tls = false;
             uri_info->use_tls = false;
             uri_info->is_full_uri = false;
@@ -1425,7 +1424,7 @@ static void extract_subscriber_id_enhanced(const char *uri, char *buffer, size_t
     *use_tls = uri_info->use_tls;
     
     if (uri_info->is_full_uri) {
-        // Para URIs completas, o subscriber ID é extraído do tópico
+        // For full URIs, the subscriber ID is extracted from the topic
         const char *topic = uri_info->topic;
         if (topic[0] == '/') {
             topic++;
@@ -1458,7 +1457,7 @@ bool handle_get_subscription(int client_socket, const char *resource_name, const
 
     // Set parent ID from resource URI
     char parent_ri[128] = "";
-    get_ri_from_resource_uri_aux(resource_uri, NULL, parent_ri, sizeof(parent_ri)); // Nova função, ver abaixo
+    get_ri_from_resource_uri_aux(resource_uri, NULL, parent_ri, sizeof(parent_ri)); // new helper, see below
     strncpy(sub.parent_id, parent_ri, sizeof(sub.parent_id) - 1);
     strncpy(sub.resource_uri, resource_uri, sizeof(sub.resource_uri) - 1);
 
@@ -1600,10 +1599,10 @@ bool send_http_notification(const char *url, const char *json_payload) {
             if (response_code >= 200 && response_code < 300) {
                 success = true;
             } else {
-                printf("[SUB] Resposta da notificação HTTP %ld do servidor\n", response_code);
+                printf("[SUB] HTTP notification response code %ld from server\n", response_code);
             }
         } else {
-            printf("[SUB] Falha ao enviar notificação HTTP: %s\n", curl_easy_strerror(res));
+            printf("[SUB] Failed to send HTTP notification: %s\n", curl_easy_strerror(res));
         }
 
         // Cleanup
@@ -1625,9 +1624,9 @@ void* send_http_notification_thread(void *arg) {
     bool success = send_http_notification(args->url, args->payload);
 
     if (success) {
-        printf("[HTTP] Notificação enviada via HTTP para %s\n", args->url);
+        printf("[HTTP] Notification sent via HTTP to %s\n", args->url);
     } else {
-        printf("[HTTP] Falha ao enviar notificação HTTP para %s\n", args->url);
+        printf("[HTTP] Failed to send HTTP notification to %s\n", args->url);
     }
 
     free(args->url);

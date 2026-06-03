@@ -277,7 +277,7 @@ char *get_current_time_plus_mia(int mia)
     if (result == NULL)
     {
         // Handle memory allocation failure
-        LOG_ERR("Failed to allocate memory for result string");
+        LOG_ERROR("Failed to allocate memory for result string");
         exit(EXIT_FAILURE);
     }
 
@@ -285,7 +285,7 @@ char *get_current_time_plus_mia(int mia)
     if (strftime(result, 20, "%Y-%m-%d %H:%M:%S", tm_target) == 0)
     {
         // Handle strftime failure
-        LOG_ERR("Failed to format time string");
+        LOG_ERROR("Failed to format time string");
         free(result);
         exit(EXIT_FAILURE);
     }

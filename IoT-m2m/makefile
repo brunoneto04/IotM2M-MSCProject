@@ -14,7 +14,9 @@ CFLAGS += -DENABLE_LOGGING
 endif
 
 # Libraries
-LIBS = -L/usr/local/lib -lcoap-3 -lssl -lcrypto -lcurl -lpaho-mqtt3cs -lpaho-mqtt3c -ljson-c -lsqlite3 -lpthread
+LIBS = -L/usr/local/lib -L/usr/lib/x86_64-linux-gnu \
+       -lcoap-3-openssl -lssl -lcrypto -lcurl \
+       -lpaho-mqtt3cs -lpaho-mqtt3c -ljson-c -lsqlite3 -lpthread
 
 # Source files
 SRCS = main.c \
@@ -26,6 +28,7 @@ SRCS = main.c \
        handlers/common.c \
        handlers/mqtt_client.c \
        handlers/mqtt_handler.c \
+       handlers/schedule.c \
 
 
 # Object files

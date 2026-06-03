@@ -59,21 +59,27 @@ int main()
     signal(SIGINT,  handle_shutdown);
     signal(SIGTERM, handle_shutdown);
 
+    //Initialize the database schema for the new Schedule feature
+    init_schedule_table();
+
     // Write CSEBase value to database
     handle_request_csebase_create();
 
     // Start check and delete expired resources thread
     if (pthread_create(&check_thread, NULL, check_and_delete_expired_resources, NULL) != 0)
     {
-        LOG_ERR("Error creating check thread");
+        LOG_ERROR("Error creating check thread");
         return 1;
     }
+
+    // Start background schedule evaluation thread
+    start_scheduler_thread();
 
 #ifdef ENABLE_HTTP
     // Create and start the web server thread
     if (pthread_create(&web_server_thread, NULL, start_web_server, NULL) != 0)
     {
-        LOG_ERR("Error creating web server thread");
+        LOG_ERROR("Error creating web server thread");
         return 1;
     }
 
@@ -83,7 +89,7 @@ int main()
 #ifdef ENABLE_COAP
     // Create and start the CoAP server thread
     if (pthread_create(&coap_server_thread, NULL, start_coap_server, NULL) != 0) {
-        LOG_ERR("Error creating CoAP server thread");
+        LOG_ERROR("Error creating CoAP server thread");
         return 1;
     }
 
@@ -98,6 +104,9 @@ int main()
 #ifdef ENABLE_COAP
     pthread_join(coap_server_thread, NULL);
 #endif
+
+    // Wake and join the scheduler thread cleanly
+    stop_scheduler_thread();
 
     return 0;
 }
@@ -396,6 +405,10 @@ void handle_request(int client_socket)
                 bool getSubscription = handle_get_subscription(client_socket, subscription_name, resource_uri);
                 //LOG("%u", getSubscription);
             }
+            else if (strcmp(ty, "29") == 0)
+            {
+                handle_schedule_retrieve(&http_params, container_name);
+            }
             else if (strcmp(ty, "4") == 0)
             {
                 char *jsonBody = handle_request_cin_get(&http_params, csebase_name, app_name, container_name, content_name, "GET");
@@ -547,9 +560,9 @@ void handle_request(int client_socket)
                             success, strlen(response), response);
                     write(client_socket, final_response, strlen(final_response));
                 } else {
-                    //Verificar se a resposta HTTP já está completa
+                    // Check if the HTTP response is already fully formatted
                     if (strlen(response) > 0 && strncmp(response, "HTTP/1.1", 8) == 0) {
-                        //Resposta HTTP já formatada (422, etc.) - enviar diretamente
+                        // Already-formatted HTTP response (422, etc.) — send directly
                         write(client_socket, response, strlen(response));
                     } else if (strlen(response) > 0) {
                         char full_response[8192];
@@ -584,7 +597,11 @@ void handle_request(int client_socket)
         }
         else if (app_name != NULL)
         {
-            handle_request_container_post(&http_params, csebase_name, app_name, request, body);
+            if (key && strcmp(key, "m2m:sch") == 0) {
+                handle_schedule_create(&http_params, app_name, body);
+            } else {
+                handle_request_container_post(&http_params, csebase_name, app_name, request, body);
+            }
         }
         else if (csebase_name != NULL)
         {
@@ -641,7 +658,11 @@ void handle_request(int client_socket)
         }
         else if (container_name != NULL)
         {
-            handle_request_container_put(&http_params, csebase_name, app_name, container_name, request, body);
+            if (strcmp(ty, "29") == 0) {
+                handle_schedule_update(&http_params, container_name);
+            } else {
+                handle_request_container_put(&http_params, csebase_name, app_name, container_name, request, body);
+            }
         }
         else if (app_name != NULL)
         {
@@ -667,7 +688,11 @@ void handle_request(int client_socket)
     {
         // Handle DELETE request
         LOG("[HTTP] DELETE request received");
-        if (subscription_name == NULL && content_name == NULL && container_name != NULL && (strcmp(ty, "-1") != 0))
+        if (subscription_name == NULL && content_name == NULL && container_name != NULL && strcmp(ty, "29") == 0)
+        {
+            handle_schedule_delete(&http_params, container_name);
+        }
+        else if (subscription_name == NULL && content_name == NULL && container_name != NULL && (strcmp(ty, "-1") != 0))
         {
             handle_request_container_delete(&http_params, csebase_name, app_name, container_name, "DELETE", NULL);
         }
@@ -972,7 +997,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         // Handle PUT request
         if (content_name != NULL) {
-            //Não existe handle_request_cin_put, por alguma razão não explorada
+            // handle_request_cin_put is not implemented
             // handle_request_content_put(&coap_params, csebase_name, app_name, container_name, content_name, body);
         }
         else if (container_name != NULL) {
@@ -1065,7 +1090,7 @@ void *check_and_delete_expired_resources(void *arg)
         rc = sqlite3_open(DB_PATH, &db);
         if (rc)
         {
-            LOG_ERR("Can't open database: %s", sqlite3_errmsg(db));
+            LOG_ERROR("Can't open database: %s", sqlite3_errmsg(db));
             return NULL;
         }
 
@@ -1114,7 +1139,7 @@ void *check_and_delete_expired_resources(void *arg)
 
         if (rc != SQLITE_DONE)
         {
-            LOG_ERR("Execution failed: %s", sqlite3_errmsg(db));
+            LOG_ERROR("Execution failed: %s", sqlite3_errmsg(db));
         }
 
         // Clean up
