@@ -72,6 +72,9 @@ int main()
         return 1;
     }
 
+    // Start background schedule evaluation thread
+    start_scheduler_thread();
+
 #ifdef ENABLE_HTTP
     // Create and start the web server thread
     if (pthread_create(&web_server_thread, NULL, start_web_server, NULL) != 0)
@@ -101,6 +104,9 @@ int main()
 #ifdef ENABLE_COAP
     pthread_join(coap_server_thread, NULL);
 #endif
+
+    // Wake and join the scheduler thread cleanly
+    stop_scheduler_thread();
 
     return 0;
 }

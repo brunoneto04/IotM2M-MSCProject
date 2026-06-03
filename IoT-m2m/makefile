@@ -26,6 +26,7 @@ SRCS = main.c \
        handlers/common.c \
        handlers/mqtt_client.c \
        handlers/mqtt_handler.c \
+       handlers/schedule.c \
 
 
 # Object files

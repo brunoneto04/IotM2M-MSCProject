@@ -6,6 +6,8 @@
 #include <string.h>
 #include <json-c/json.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <time.h>
 
 /**
  * @brief Initializes the 'schedules' table in the SQLite database.
@@ -249,4 +251,146 @@ void handle_schedule_delete(struct response_params *params, const char *identifi
     if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
 }
 
-// --- Skeleton for Background Scheduling logic (Phase 7.5) ---
+// --- Background Scheduling logic (Phase 7.5) ---
+
+/*
+ * check_and_trigger_actions() is defined by action module.
+ * Replace the extern declaration below with the appropriate #include
+ * once header is available.
+ */
+extern void check_and_trigger_actions(void);
+
+static pthread_t       scheduler_tid;
+static pthread_mutex_t scheduler_mtx  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  scheduler_cond = PTHREAD_COND_INITIALIZER;
+static volatile int    scheduler_active = 0;
+
+/* Match one cron field against a calendar value.
+ * Supports: * | n | n-m | *\/step | n-m/step | comma-separated list of any above. */
+static bool match_field(const char *field, int value) {
+    if (strcmp(field, "*") == 0) return true;
+
+    char buf[64];
+    strncpy(buf, field, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    char *tok = strtok(buf, ",");
+    while (tok) {
+        char *slash = strchr(tok, '/');
+        int step = 1;
+        if (slash) {
+            step = atoi(slash + 1);
+            if (step < 1) step = 1;
+            *slash = '\0';
+        }
+
+        int lo, hi;
+        char *dash = strchr(tok, '-');
+        if (*tok == '*') {
+            lo = 0; hi = 59;
+        } else if (dash) {
+            lo = atoi(tok);
+            hi = atoi(dash + 1);
+        } else {
+            lo = hi = atoi(tok);
+        }
+
+        if (value >= lo && value <= hi && (value - lo) % step == 0)
+            return true;
+
+        tok = strtok(NULL, ",");
+    }
+    return false;
+}
+
+bool evaluate_schedule(const char *sce) {
+    if (!sce) return false;
+
+    char f[5][16];
+    if (sscanf(sce, "%15s %15s %15s %15s %15s",
+               f[0], f[1], f[2], f[3], f[4]) != 5)
+        return false;
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    /* cron field order: minute  hour  day-of-month  month  day-of-week */
+    return match_field(f[0], t->tm_min)       /* 0-59  */
+        && match_field(f[1], t->tm_hour)      /* 0-23  */
+        && match_field(f[2], t->tm_mday)      /* 1-31  */
+        && match_field(f[3], t->tm_mon + 1)   /* 1-12  */
+        && match_field(f[4], t->tm_wday);     /* 0-6   */
+}
+
+static void *scheduler_thread_func(void *arg) {
+    (void)arg;
+    LOG("[Scheduler] Background thread started.");
+
+    while (1) {
+        /* Query every active schedule and fire on match. */
+        sqlite3 *db;
+        if (sqlite3_open(DB_PATH, &db) == SQLITE_OK) {
+            sqlite3_stmt *stmt;
+            const char *sql = "SELECT sce FROM schedules";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const char *sce = (const char *)sqlite3_column_text(stmt, 0);
+                    if (evaluate_schedule(sce)) {
+                        LOG("[Scheduler] Schedule matched ('%s') — triggering actions.", sce);
+                        check_and_trigger_actions();
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+            sqlite3_close(db);
+        }
+
+        /* Wait 60 s (cron granularity) or wake immediately on stop signal. */
+        struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_sec += 60;
+
+        pthread_mutex_lock(&scheduler_mtx);
+        if (!scheduler_active) {
+            pthread_mutex_unlock(&scheduler_mtx);
+            break;
+        }
+        pthread_cond_timedwait(&scheduler_cond, &scheduler_mtx, &deadline);
+        int still_active = scheduler_active;
+        pthread_mutex_unlock(&scheduler_mtx);
+
+        if (!still_active) break;
+    }
+
+    LOG("[Scheduler] Background thread exiting.");
+    return NULL;
+}
+
+void start_scheduler_thread(void) {
+    pthread_mutex_lock(&scheduler_mtx);
+    scheduler_active = 1;
+    pthread_mutex_unlock(&scheduler_mtx);
+
+    if (pthread_create(&scheduler_tid, NULL, scheduler_thread_func, NULL) != 0) {
+        LOG_ERR("[Scheduler] Failed to create background thread.");
+        pthread_mutex_lock(&scheduler_mtx);
+        scheduler_active = 0;
+        pthread_mutex_unlock(&scheduler_mtx);
+        return;
+    }
+    LOG("[Scheduler] Thread created.");
+}
+
+void stop_scheduler_thread(void) {
+    pthread_mutex_lock(&scheduler_mtx);
+    if (!scheduler_active) {
+        pthread_mutex_unlock(&scheduler_mtx);
+        return;
+    }
+    scheduler_active = 0;
+    pthread_cond_signal(&scheduler_cond);   /* wake thread immediately */
+    pthread_mutex_unlock(&scheduler_mtx);
+
+    pthread_join(scheduler_tid, NULL);
+    LOG("[Scheduler] Thread joined cleanly.");
+}

@@ -28,4 +28,14 @@ void handle_schedule_retrieve(struct response_params *params, const char *identi
 void handle_schedule_update(struct response_params *params, const char *identifier);
 void handle_schedule_delete(struct response_params *params, const char *identifier);
 
+/* Evaluates a cron-style sce field against the current local time.
+ * Format: "minute hour day-of-month month day-of-week"
+ * Supports: *, exact numbers, comma lists (1,3), ranges (1-5), steps (*\/2).
+ * Returns true when the current time matches all five fields. */
+bool evaluate_schedule(const char *sce);
+
+/* Start/stop the background scheduler pthread. */
+void start_scheduler_thread(void);
+void stop_scheduler_thread(void);
+
 #endif

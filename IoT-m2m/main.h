@@ -7,6 +7,7 @@
 #include "include/container.h"
 #include "include/contentInstance.h"
 #include "include/subscription.h"
+#include "include/schedule.h"
 #include <pthread.h>
 #include <signal.h>
 #include <sys/select.h>
