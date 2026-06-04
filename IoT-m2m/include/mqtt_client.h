@@ -4,7 +4,7 @@
 #include "mqtt_types.h"
 #include <stdbool.h>
 
-//Funcões necessárias para o envio de notificações MQTT
+// Functions required for sending MQTT notifications
 MQTTConnection *mqtt_create_dynamic_connection(const char *address, int port, bool use_tls);
 
 bool mqtt_publish2(MQTTConnection* conn, const char* topic, const char* payload);

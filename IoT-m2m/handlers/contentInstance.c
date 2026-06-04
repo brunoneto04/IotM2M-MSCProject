@@ -10,6 +10,7 @@ AUTHORSHIP -------------------------------------------------
 
 #include "../include/contentInstance.h"
 #include "subscription.h"
+#include "logger.h"
 
 char *handle_request_cin_get(struct response_params *params, char *csebase_name, char *ae_name, char *container_name, char *cin_name, char *request_type)
 {
@@ -137,7 +138,10 @@ char *handle_request_cin_get(struct response_params *params, char *csebase_name,
             }
         }
 
-        // Add closing braces for the JSON response
+        // Remove trailing ", " and close JSON
+        size_t len = strlen(jsonBody);
+        if (len >= 2 && jsonBody[len-2] == ',' && jsonBody[len-1] == ' ')
+            jsonBody[len-2] = '\0';
         strcat(jsonBody, "}}");
 
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
@@ -228,7 +232,7 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     }
 
     // Print the JSON body for debugging purposes
-    printf("jsonBody: %s\n", jsonBody);
+    LOG("jsonBody: %s", jsonBody);
 
     // Attempt to parse the JSON string
     json_object *root = json_tokener_parse(jsonBody);
@@ -415,7 +419,7 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     rc = sqlite3_open(DB_PATH, &db);
     if (rc != SQLITE_OK)
     {
-        fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+        LOG_ERROR("Cannot open database: %s", sqlite3_errmsg(db));
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
         {
             snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
@@ -1045,8 +1049,8 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
     // Begin transaction
     sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
 
-    // Enquanto o currentNrOfInstances cni >= maxNrOfInstances mni, vai apagando content instances mais antigos
-    // Enquanto o (currentByteSize cbs + contentSize cs) > maxByteSize mbs, vai apagando content instances mais antigos até o (currentByteSize cbs + contentSize cs) <= maxByteSize mbs
+    // As long as currentNrOfInstances cni >= maxNrOfInstances mni, delete the oldest content instances
+    // While (currentByteSize + contentSize) > maxByteSize, delete oldest content instances until it fits
     // currentNrOfInstances cni++
     // currentByteSize cbs += contentSize cs
 
@@ -1213,7 +1217,9 @@ void handle_request_cin_post(struct response_params *params, char *csebase_name,
             
             const char* notification_content = json_object_to_json_string(notification);
             
+#ifdef ENABLE_MQTT
             handle_mqtt_notification(child_resource_uri, notification_content, 3);
+#endif
             
             json_object_put(notification);
         }

@@ -25,6 +25,7 @@ AUTHORSHIP File Updated
  * Date:    May 2025
 */
 
+#include "logger.h"
 #include "main.h"
 #include "response_params.h"
 #ifdef ENABLE_MQTT
@@ -43,12 +44,11 @@ pthread_t coap_server_thread;
 #endif
 volatile sig_atomic_t stop = 0;
 
-//Signal handler
-void handle_signal(int signal)
+void handle_shutdown(int signal)
 {
-    if (signal == SIGINT) {
-        stop = 1;
-    }
+    (void)signal;
+    write(STDOUT_FILENO, "\n", 1);
+    stop = 1;
 }
 
 int main()
@@ -56,8 +56,11 @@ int main()
 
     system("mkdir -p certs");
 
-    // Set up the SIGINT signal handler
-    signal(SIGINT, handle_signal);
+    signal(SIGINT,  handle_shutdown);
+    signal(SIGTERM, handle_shutdown);
+
+    //Initialize the database schema for the new Schedule feature
+    init_schedule_table();
 
     // Write CSEBase value to database
     handle_request_csebase_create();
@@ -65,15 +68,18 @@ int main()
     // Start check and delete expired resources thread
     if (pthread_create(&check_thread, NULL, check_and_delete_expired_resources, NULL) != 0)
     {
-        fprintf(stderr, "Error creating check thread\n");
+        LOG_ERROR("Error creating check thread");
         return 1;
     }
+
+    // Start background schedule evaluation thread
+    start_scheduler_thread();
 
 #ifdef ENABLE_HTTP
     // Create and start the web server thread
     if (pthread_create(&web_server_thread, NULL, start_web_server, NULL) != 0)
     {
-        fprintf(stderr, "Error creating web server thread\n");
+        LOG_ERROR("Error creating web server thread");
         return 1;
     }
 
@@ -83,7 +89,7 @@ int main()
 #ifdef ENABLE_COAP
     // Create and start the CoAP server thread
     if (pthread_create(&coap_server_thread, NULL, start_coap_server, NULL) != 0) {
-        fprintf(stderr, "Error creating CoAP server thread\n");
+        LOG_ERROR("Error creating CoAP server thread");
         return 1;
     }
 
@@ -98,6 +104,9 @@ int main()
 #ifdef ENABLE_COAP
     pthread_join(coap_server_thread, NULL);
 #endif
+
+    // Wake and join the scheduler thread cleanly
+    stop_scheduler_thread();
 
     return 0;
 }
@@ -143,7 +152,7 @@ void *start_web_server(void *arg) {
         return NULL;
     }
 
-    printf("[HTTP] Server listening on port %d...\n", PORT);
+    LOG("[HTTP] Server listening on port %d...", PORT);
 
     // Accept incoming connections and handle requests
     while (!stop) {
@@ -169,6 +178,7 @@ void *start_web_server(void *arg) {
 
     // Close the server socket
     close(server_socket);
+    printf("[HTTP] Server stopped.\n");
     return NULL;
 }
 #endif /* ENABLE_HTTP */
@@ -194,7 +204,7 @@ void *start_coap_server(void *arg) {
         return NULL;
     }
 
-    printf("[CoAP] Server listening on port %d...\n", COAP_PORT);
+    LOG("[CoAP] Server listening on port %d...", COAP_PORT);
     resource = coap_resource_unknown_init(handle_coap_request);
     coap_register_handler(resource, COAP_REQUEST_GET, handle_coap_request);
     coap_register_handler(resource, COAP_REQUEST_POST, handle_coap_request);
@@ -208,7 +218,7 @@ void *start_coap_server(void *arg) {
 
     coap_free_context(ctx);
     coap_cleanup();
-    printf("[CoAP] CoAP cleanup...");
+    LOG("[CoAP] CoAP cleanup...");
     return NULL;
 }
 #endif /* ENABLE_COAP */
@@ -241,11 +251,31 @@ void handle_request(int client_socket)
     ssize_t bytes_read = read(client_socket, request, BUFFER_SIZE - 1);
     if (bytes_read <= 0) {
         // Connection closed or error, do not process
-        printf("[HTTP] Empty request\n");
+        LOG("[HTTP] Empty request");
         close(client_socket);
         return;
     }
     request[bytes_read] = '\0'; // Null-terminate
+
+    // For HTTP/1.1 keep-alive connections the body can arrive in a second TCP
+    // segment.  Read until Content-Length is satisfied.
+    char *hdr_end = strstr(request, "\r\n\r\n");
+    if (hdr_end) {
+        char *cl_ptr = strcasestr(request, "Content-Length:");
+        if (cl_ptr && cl_ptr < hdr_end) {
+            int content_length = atoi(cl_ptr + 15);
+            int header_bytes   = (int)((hdr_end + 4) - request);
+            int body_received  = (int)(bytes_read - header_bytes);
+            while (body_received < content_length && bytes_read < BUFFER_SIZE - 1) {
+                ssize_t more = read(client_socket, request + bytes_read,
+                                    (size_t)(BUFFER_SIZE - 1 - bytes_read));
+                if (more <= 0) break;
+                bytes_read += more;
+                request[bytes_read] = '\0';
+                body_received += (int)more;
+            }
+        }
+    }
 
     strncpy(request_copy, request, BUFFER_SIZE - 1); // Make a copy of the request
     
@@ -266,10 +296,20 @@ void handle_request(int client_socket)
         method = strdup(token);
     }
     // Validate HTTP method
-    if (method == NULL || (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 && strcmp(method, "PUT") != 0 && strcmp(method, "DELETE") != 0))
+    if (method == NULL)
     {
-        // Invalid or unsupported HTTP method
-        printf("[HTTP] Unsupported HTTP method: %s\n", method);
+        // Invalid HTTP method
+         LOG("[HTTP] Unsupported HTTP method: <null>");
+         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
+         write(client_socket, error_message, strlen(error_message));
+         close(client_socket);
+         free(method);
+         return;
+     }
+     else if (strcmp(method, "GET") != 0 && strcmp(method, "POST") != 0 && strcmp(method, "PUT") != 0 && strcmp(method, "DELETE") != 0)
+     {
+         // Unsupported HTTP method
+        LOG("[HTTP] Unsupported HTTP method: %s", method);
         const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
         write(client_socket, error_message, strlen(error_message));
         close(client_socket);
@@ -372,15 +412,15 @@ void handle_request(int client_socket)
     }
 
     // Print the parsed values
-    printf("[HTTP] Parsed fu value: %s\n", fu);
-    printf("[HTTP] Parsed ty value: %s\n", ty);
-    printf("[HTTP] Method:    %s\nCSEBase:   %s\nAE:        %s\nContainer: %s\nContent:   %s\nSubscription:   %s\nAction: %s\n", method, csebase_name, app_name, container_name, content_name, subscription_name, action_name);
+    LOG("[HTTP] Parsed fu value: %s", fu);
+    LOG("[HTTP] Parsed ty value: %s", ty);
+    LOG("[HTTP] Method:    %s\nCSEBase:   %s\nAE:        %s\nContainer: %s\nContent:   %s\nSubscription:   %s", method, csebase_name, app_name, container_name, content_name, subscription_name);
 
     if (strcmp(method, "GET") == 0)
     {
         // Handle GET request
-        printf("[HTTP] GET request received\n");
-        if (content_name != NULL || subscription_name != NULL || ty[0] != '\0' || action_name != NULL)
+        LOG("[HTTP] GET request received");
+        if (content_name != NULL || subscription_name != NULL || ty[0] != '\0')
         {
             if (strcmp(ty, "23") == 0)
             {
@@ -390,7 +430,11 @@ void handle_request(int client_socket)
                         csebase_name, app_name, container_name);
                 
                 bool getSubscription = handle_get_subscription(client_socket, subscription_name, resource_uri);
-                //printf("%u\n", getSubscription);
+                //LOG("%u", getSubscription);
+            }
+            else if (strcmp(ty, "29") == 0)
+            {
+                handle_schedule_retrieve(&http_params, container_name);
             }
             else if (strcmp(ty, "4") == 0)
             {
@@ -460,11 +504,11 @@ void handle_request(int client_socket)
         char *body_start = strstr(request, "\r\n\r\n");
         char *body = NULL;
 
-        printf("[HTTP] POST request received\n");
+        LOG("[HTTP] POST request received");
         if (body_start == NULL || *(body_start + 4) == '\0')
         {
             // No body found in request or empty body
-            printf("[HTTP] No body provided: %s\n", method);
+            LOG("[HTTP] No body provided: %s", method);
             const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
@@ -484,7 +528,7 @@ void handle_request(int client_socket)
         if (content_name != NULL)
         {
             // Unsupported parameter scenario: content_name
-            printf("[HTTP] Unsupported parameter scenario: content_name\n");
+            LOG("[HTTP] Unsupported parameter scenario: content_name");
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
 
@@ -553,9 +597,9 @@ void handle_request(int client_socket)
                             success, strlen(response), response);
                     write(client_socket, final_response, strlen(final_response));
                 } else {
-                    //Verificar se a resposta HTTP já está completa
+                    // Check if the HTTP response is already fully formatted
                     if (strlen(response) > 0 && strncmp(response, "HTTP/1.1", 8) == 0) {
-                        //Resposta HTTP já formatada (422, etc.) - enviar diretamente
+                        // Already-formatted HTTP response (422, etc.) — send directly
                         write(client_socket, response, strlen(response));
                     } else if (strlen(response) > 0) {
                         char full_response[8192];
@@ -593,7 +637,11 @@ void handle_request(int client_socket)
         }
         else if (app_name != NULL)
         {
-            handle_request_container_post(&http_params, csebase_name, app_name, request, body);
+            if (key && strcmp(key, "m2m:sch") == 0) {
+                handle_schedule_create(&http_params, app_name, body);
+            } else {
+                handle_request_container_post(&http_params, csebase_name, app_name, request, body);
+            }
         }
         else if (csebase_name != NULL)
         {
@@ -602,7 +650,7 @@ void handle_request(int client_socket)
         else
         {
             // Unsupported parameter scenario: csebase_name
-            printf("[HTTP] Unsupported parameter scenario: csebase_name\n");
+            LOG("[HTTP] Unsupported parameter scenario: csebase_name");
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
@@ -640,14 +688,18 @@ void handle_request(int client_socket)
         printf("[HTTP] Body:\n%s\n", body);
 
         // Handle PUT request
-        printf("[HTTP] PUT request received\n");
+        LOG("[HTTP] PUT request received");
         if (action_name != NULL && strcmp(ty, "65") == 0)
         {
             handle_request_action_put(&http_params, csebase_name, app_name, container_name, action_name, body);
         }
         else if (container_name != NULL)
         {
-            handle_request_container_put(&http_params, csebase_name, app_name, container_name, body, body);
+            if (strcmp(ty, "29") == 0) {
+                handle_schedule_update(&http_params, container_name, body);
+            } else {
+                handle_request_container_put(&http_params, csebase_name, app_name, container_name, body, body);
+            }
         }
         else if (app_name != NULL)
         {
@@ -655,7 +707,8 @@ void handle_request(int client_socket)
         }
         else
         {
-            printf("[HTTP] Unsupported parameter scenario: %s\n", method);
+            // Unsupported parameter scenario: csebase_name
+            LOG("[HTTP] Unsupported parameter scenario: %s", method);
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
         }
@@ -663,8 +716,12 @@ void handle_request(int client_socket)
     else if (strcmp(method, "DELETE") == 0)
     {
         // Handle DELETE request
-        printf("[HTTP] DELETE request received\n");
-        if (action_name != NULL && strcmp(ty, "65") == 0)
+        LOG("[HTTP] DELETE request received");
+        if (subscription_name == NULL && content_name == NULL && container_name != NULL && strcmp(ty, "29") == 0)
+        {
+            handle_schedule_delete(&http_params, container_name);
+        }
+        else if (action_name != NULL && strcmp(ty, "65") == 0)
         {
             handle_delete_action(client_socket, action_name);
         }
@@ -683,7 +740,7 @@ void handle_request(int client_socket)
         else
         {
             // Unsupported parameter scenario: csebase_name
-            printf("[HTTP] Unsupported parameter scenario: %s\n", method);
+            LOG("[HTTP] Unsupported parameter scenario: %s", method);
             const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
@@ -736,20 +793,20 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     coap_pdu_type_t msg_type = coap_pdu_get_type(request);
     unsigned int msg_id = coap_pdu_get_mid(request);
     
-    printf("\n[CoAP] CoAP request received: \nMID=%u", coap_pdu_get_mid(request));
+    LOG("[CoAP] CoAP request received: \nMID=%u", coap_pdu_get_mid(request));
     
     if (msg_type == COAP_MESSAGE_CON) {
         coap_pdu_set_type(response, COAP_MESSAGE_ACK);
         coap_pdu_set_mid(response, msg_id);  // Match message ID
-        printf("\n[CoAP] Type=CON\n");
+        LOG("[CoAP] Type=CON");
     } 
     else if (msg_type == COAP_MESSAGE_NON) {
         // Non-confirmable message - send NON response
         coap_pdu_set_type(response, COAP_MESSAGE_NON);
-        printf("\n[CoAP] Type=NON\n");
+        LOG("[CoAP] Type=NON");
     }
     else if (msg_type == COAP_MESSAGE_ACK) {
-        printf("\n[CoAP] Type=ACK\n");
+        LOG("[CoAP] Type=ACK");
         return;
     }
 
@@ -778,7 +835,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
     if (method == NULL) 
     {
-        printf("[CoAP] Failed to map CoAP method\n");
+        LOG("[CoAP] Failed to map CoAP method");
         coap_pdu_set_code(response, COAP_RESPONSE_CODE(500));
         const char *msg = "Internal Server Error";
         coap_add_data(response, strlen(msg), (const uint8_t *)msg);
@@ -789,7 +846,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     // Extract URI path from the CoAP pdu
     coap_string_t *uri_path = coap_get_uri_path(request);
     if (uri_path) {
-        printf("[CoAP] URI Path: %.*s\n", (int)uri_path->length, uri_path->s);
+        LOG("[CoAP] URI Path: %.*s", (int)uri_path->length, uri_path->s);
         // Tokenize the URI path using '/' as a delimiter
         char *path_copy = strndup((const char *)uri_path->s, uri_path->length);
         char *token = strtok(path_copy, "/");
@@ -842,11 +899,11 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
     }
 
     // Print the parsed values
-    printf("[CoAP] Method:    %s\nCSEBase:   %s\nAE:        %s\nContainer: %s\nContent:   %s\n", method, csebase_name, app_name, container_name, content_name);
+    LOG("[CoAP] Method:    %s\nCSEBase:   %s\nAE:        %s\nContainer: %s\nContent:   %s", method, csebase_name, app_name, container_name, content_name);
 
     // Handle the CoAP request based on the method
     if (strcmp(method, "GET") == 0) {
-        printf("[CoAP] Handling GET request\n");
+        LOG("[CoAP] Handling GET request");
         if (content_name != NULL)
         {
             char *jsonBody = handle_request_cin_get(&coap_params, csebase_name, app_name, container_name, content_name, "GET");
@@ -887,7 +944,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
     } else if (strcmp(method, "POST") == 0) 
     {
-        printf("[CoAP] Handling POST request\n");
+        LOG("[CoAP] Handling POST request");
         // Get payload data from request
         const uint8_t *payload;
         size_t payload_len;
@@ -900,7 +957,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
         if (!body || strlen(body) == 0) {
             // No body provided
-            printf("[CoAP] No body provided: %s\n", method);
+            LOG("[CoAP] No body provided: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
@@ -914,7 +971,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
         if (content_name != NULL) {
             // Unsupported parameter scenario: content_name
-            printf("[CoAP] Unsupported parameter scenario: content_name\n");
+            LOG("[CoAP] Unsupported parameter scenario: content_name");
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
             free(body);
             return;
@@ -937,13 +994,13 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         } else if (csebase_name != NULL) {
             handle_request_ae_post(&coap_params, csebase_name, body, body);
         } else {
-            printf("[CoAP] Unsupported parameter scenario: csebase_name\n");
+            LOG("[CoAP] Unsupported parameter scenario: csebase_name");
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
         }
 
         free(body);
     } else if (strcmp(method, "PUT") == 0) {
-        printf("[CoAP] Handling PUT request\n");
+        LOG("[CoAP] Handling PUT request");
         // Get payload data from request
         const uint8_t *payload;
         size_t payload_len;
@@ -952,12 +1009,12 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
 
         if (payload_len > 0) {
             body = strndup((char *)payload, payload_len);
-            printf("[CoAP] Body:\n%s\n", body);
+            LOG("[CoAP] Body:\n%s", body);
         }
 
         if (!body || strlen(body) == 0) {
             // No body provided
-            printf("[CoAP] No body provided: %s\n", method);
+            LOG("[CoAP] No body provided: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_BAD_REQUEST);
             const char *error_msg = "{\"error\":\"No body provided\"}";
             coap_add_data(response, strlen(error_msg), (const uint8_t *)error_msg);
@@ -970,7 +1027,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         // Handle PUT request
         if (content_name != NULL) {
-            //Não existe handle_request_cin_put, por alguma razão não explorada
+            // handle_request_cin_put is not implemented
             // handle_request_content_put(&coap_params, csebase_name, app_name, container_name, content_name, body);
         }
         else if (container_name != NULL) {
@@ -981,12 +1038,12 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         else {
             // Unsupported parameter scenario
-            printf("[CoAP] Unsupported parameter scenario: %s\n", method);
+            LOG("[CoAP] Unsupported parameter scenario: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
         }
         free(body);
     } else if (strcmp(method, "DELETE") == 0) {
-        printf("[CoAP] Handling DELETE request\n");
+        LOG("[CoAP] Handling DELETE request");
         if (content_name == NULL && container_name != NULL) {
             handle_request_container_delete(&coap_params, csebase_name, app_name, 
                                         container_name, "DELETE", NULL);
@@ -997,7 +1054,7 @@ void handle_coap_request(coap_resource_t *resource,coap_session_t *session,const
         }
         else {
             // Unsupported parameter scenario
-            printf("[CoAP] Unsupported parameter scenario: %s\n", method);
+            LOG("[CoAP] Unsupported parameter scenario: %s", method);
             coap_pdu_set_code(response, COAP_RESPONSE_CODE_NOT_ALLOWED);
         }
     }
@@ -1063,7 +1120,7 @@ void *check_and_delete_expired_resources(void *arg)
         rc = sqlite3_open(DB_PATH, &db);
         if (rc)
         {
-            fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(db));
+            LOG_ERROR("Can't open database: %s", sqlite3_errmsg(db));
             return NULL;
         }
 
@@ -1076,7 +1133,7 @@ void *check_and_delete_expired_resources(void *arg)
         struct tm *tm_target = localtime(&c_time);
         char current_time[20];
         strftime(current_time, sizeof(current_time), "%Y-%m-%d %H:%M:%S", tm_target);
-        //printf("Current UTC timestamp: %s\n", current_time);
+        //LOG("Current UTC timestamp: %s", current_time);
 
         sqlite3_bind_text(stmt, 1, current_time, -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 2, current_time, -1, SQLITE_STATIC);
@@ -1090,10 +1147,10 @@ void *check_and_delete_expired_resources(void *arg)
             char *container_rn = (char *)sqlite3_column_text(stmt, 2);
             char *content_instance_rn = (char *)sqlite3_column_text(stmt, 3);
 
-            printf("[CoAP] csebase_rn: %s\n", csebase_rn != NULL ? csebase_rn : "NULL");
-            printf("[CoAP] application_entity_rn: %s\n", application_entity_rn != NULL ? application_entity_rn : "NULL");
-            printf("[CoAP] container_rn: %s\n", container_rn != NULL ? container_rn : "NULL");
-            printf("[CoAP] content_instance_rn: %s\n", content_instance_rn != NULL ? content_instance_rn : "NULL");
+             LOG("[CoAP] csebase_rn: %s", csebase_rn != NULL ? csebase_rn : "NULL");
+             LOG("[CoAP] application_entity_rn: %s", application_entity_rn != NULL ? application_entity_rn : "NULL");
+             LOG("[CoAP] container_rn: %s", container_rn != NULL ? container_rn : "NULL");
+             LOG("[CoAP] content_instance_rn: %s", content_instance_rn != NULL ? content_instance_rn : "NULL");
 
             // Determine which delete function to call
             if (content_instance_rn != NULL)
@@ -1112,7 +1169,7 @@ void *check_and_delete_expired_resources(void *arg)
 
         if (rc != SQLITE_DONE)
         {
-            fprintf(stderr, "Execution failed: %s\n", sqlite3_errmsg(db));
+            LOG_ERROR("Execution failed: %s", sqlite3_errmsg(db));
         }
 
         // Clean up
@@ -1161,21 +1218,21 @@ char *extract_json_key(const char *json) {
 #ifdef ENABLE_MQTT
 //MQTT callback functions
 void on_connect_callback(void* context) {
-    printf("[MQTT] Connected to MQTT broker\n");
+    LOG("[MQTT] Connected to MQTT broker");
 }
 
 void on_message_callback(void* context, const char* topic, const char* payload) {
-    printf("[MQTT] Received MQTT message:\nTopic: %s\nPayload: %s\n", topic, payload);
+    LOG("[MQTT] Received MQTT message:\nTopic: %s\nPayload: %s", topic, payload);
 }
 
 void on_disconnect_callback(void* context) {
-    printf("[MQTT] Disconnected from MQTT broker\n");
+    LOG("[MQTT] Disconnected from MQTT broker");
 }
 
 void on_error_callback(void* context, int rc) {
-    printf("[MQTT] Error occurred: %d\n", rc);
+    LOG("[MQTT] Error occurred: %d", rc);
     if (rc == 5) { // Authorization error
-        printf("[MQTT] Authorization error - shutting down\n");
+        LOG("[MQTT] Authorization error - shutting down");
         stop = 1;
     }
 }

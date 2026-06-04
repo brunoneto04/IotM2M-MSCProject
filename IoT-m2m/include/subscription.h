@@ -23,7 +23,7 @@ typedef struct {
     char event_type_str[256]; // String representation of event types
 } Subscription;
 
-// Estrutura para informações da URI MQTT
+// MQTT URI information
 typedef struct {
     char host[256];
     int port;

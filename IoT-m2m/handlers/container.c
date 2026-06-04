@@ -2439,7 +2439,7 @@ void handle_request_container_put(struct response_params *params, char *csebase_
     char resource_uri[512];
     snprintf(resource_uri, sizeof(resource_uri), "/%s/%s/%s", csebase_name, ae_name, container_name);
 
-    // Construir o JSON do container atualizado para a notificação
+    // Build updated container JSON for notification
     json_object *notification_content = json_object_new_object();
     json_object *container_obj = json_object_new_object();
 
@@ -2465,10 +2465,12 @@ void handle_request_container_put(struct response_params *params, char *csebase_
     json_object_object_add(notification_content, "m2m:cnt", container_obj);
     const char *notification_json = json_object_to_json_string(notification_content);
 
-    // Enviar notificação para evento Update_of_Resource (net=1)
-    handle_mqtt_notification(resource_uri,body, 1);
+    // Send notification for Update_of_Resource event (net=1)
+#ifdef ENABLE_MQTT
+    handle_mqtt_notification(resource_uri, body, 1);
+#endif
 
-    // Limpar objeto JSON da notificação
+    // Free notification JSON object
     json_object_put(notification_content);
 
     // Free the JSON object
@@ -2539,7 +2541,7 @@ void handle_request_container_delete(struct response_params *params, char *cseba
             return;
         }
 
-        // ========== NOTIFICAÇÃO ==========
+        // ========== NOTIFICATION ==========
 
         // Primeiro, vamos verificar a estrutura da tabela resources
         sqlite3_stmt *pragma_stmt;
@@ -2586,9 +2588,9 @@ void handle_request_container_delete(struct response_params *params, char *cseba
             {
                 const char *ri = (const char *)sqlite3_column_text(stmt_read, 0);
                 const char *rn = (const char *)sqlite3_column_text(stmt_read, 1);
-                const char *et = NULL; // Por agora não vamos buscar o et
+                const char *et = NULL; // et not fetched for now
 
-                // Construir JSON do container antes da eliminação
+                // Build container JSON before deletion
                 json_object *notification_content = json_object_new_object();
                 json_object *container_obj = json_object_new_object();
 
@@ -2646,9 +2648,11 @@ void handle_request_container_delete(struct response_params *params, char *cseba
                     char resource_uri[512];
                     snprintf(resource_uri, sizeof(resource_uri), "/%s/%s/%s", csebase_name, ae_name, container_name);
 
-                    printf("A Enviar notificação de DELETE_OF_RESOURCE");
+                    printf("Sending DELETE_OF_RESOURCE notification");
 
+#ifdef ENABLE_MQTT
                     handle_mqtt_notification(resource_uri, "", 2);
+#endif
 
                     free(container_data_json);
             }
@@ -2664,7 +2668,7 @@ void handle_request_container_delete(struct response_params *params, char *cseba
         {
             printf("ERRO ao preparar query de leitura: %s\n", sqlite3_errmsg(db));
         }
-        // ========== FIM DA NOTIFICAÇÃO ==========
+        // ========== FIM DA NOTIFICATION ==========
 
         // Begin transaction
         sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);

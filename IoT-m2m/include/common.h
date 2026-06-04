@@ -13,6 +13,8 @@
 #include <stdbool.h>
 #include "response_params.h"
 
+#include "logger.h"
+
 #define DB_PATH "./database/iotm2m.db"
 #define BUFFER_SIZE 1024
 #define LABELS_NUMBER 5

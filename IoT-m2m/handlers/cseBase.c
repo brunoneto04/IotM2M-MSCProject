@@ -59,7 +59,7 @@ void handle_request_csebase_create()
                 return;
             }
             else
-                printf("Valor inserido inválido.\n");
+                printf("Invalid value.\n");
         } while (choice != 's' && choice != 'n');
     }
 
@@ -88,7 +88,7 @@ void handle_request_csebase_create()
                 }
                 else
                 {
-                    printf("Valor inserido inválido. Tente novamente.\n");
+                    printf("Invalid value. Tente novamente.\n");
                 }
             }
             else
@@ -832,7 +832,7 @@ int delete_csebases(sqlite3 *db)
     return rc == SQLITE_DONE ? SQLITE_OK : rc;
 }
 
-// Função para verificar se existe uma CSEBase criada anteriormente
+// Function to check if a CSEBase was previously created
 bool csebase_exists(sqlite3 *db)
 {
     sqlite3_stmt *stmt;
