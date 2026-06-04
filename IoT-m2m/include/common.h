@@ -11,6 +11,7 @@
 #include <regex.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include "response_params.h"
 
 #include "logger.h"
 
@@ -31,6 +32,5 @@ int is_datetime_less_than_current_plus_mia(const char *datetime, int mia);
 char *get_current_time_plus_mia(int mia);
 bool is_valid_string_plus_three_extra_chars(const char *str);
 
-void send_response(int client_socket, int status_code, const char* response);
-
+void send_response(struct response_params *params, int status_code, const char *response);
 #endif

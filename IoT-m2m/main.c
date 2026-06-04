@@ -238,6 +238,7 @@ void handle_request(int client_socket)
     char *app_name = NULL;
     char *container_name = NULL;
     char *content_name = NULL;
+    char *action_name = NULL;
 
     char *subscription_name = NULL;
 
@@ -395,6 +396,12 @@ void handle_request(int client_socket)
                                 *query_start = '\0';
                             }
                             content_name = strdup(token);
+                        } else if (strcmp(ty, "65") == 0) {
+                            char *query_start = strchr(token, '?');
+                            if (query_start != NULL) {
+                                *query_start = '\0';
+                            }
+                            action_name = strdup(token);
                         } else {
                             strcpy(ty, "-1"); // User has put a content name, but it did not put the ty. 
                         }
@@ -437,6 +444,13 @@ void handle_request(int client_socket)
                     // Process jsonBody if needed
                     free(jsonBody);
                 }
+            }
+            else if (strcmp(ty, "65") == 0)
+            {
+                char resource_uri[512] = {0};
+                snprintf(resource_uri, sizeof(resource_uri), "/%s/%s/%s",
+                        csebase_name, app_name, container_name);
+                handle_get_action(client_socket, action_name, resource_uri);
             }
             else
             {
@@ -505,6 +519,7 @@ void handle_request(int client_socket)
             free(container_name);
             free(content_name);
             free(subscription_name);
+            free(action_name);
             return;
         }
 
@@ -525,6 +540,7 @@ void handle_request(int client_socket)
             free(container_name);
             free(content_name);
             free(subscription_name);
+            free(action_name);
             return;
         }
         else if (container_name != NULL)
@@ -557,6 +573,7 @@ void handle_request(int client_socket)
                     free(container_name);
                     free(content_name);
                     free(subscription_name);
+                    free(action_name);
                     return;
                 }
                 // Container exists, proceed with subscription handling
@@ -605,6 +622,9 @@ void handle_request(int client_socket)
             } else if (key && strcmp(key, "m2m:cin") == 0) { // Check if the request is "m2m:cin"
                 free(sub_key);
                 handle_request_cin_post(&http_params, csebase_name, app_name, container_name, request, body);
+            } else if (key && strcmp(key, "m2m:act") == 0) {
+                free(sub_key);
+                handle_request_action_post(&http_params, csebase_name, app_name, container_name, body);
             } else {
                 free(sub_key);
                 // Unsupported request type
@@ -640,6 +660,7 @@ void handle_request(int client_socket)
             free(app_name);
             free(container_name);
             free(content_name);
+            free(action_name);
             return;
         }
     }
@@ -648,51 +669,10 @@ void handle_request(int client_socket)
         char *body_start = strstr(request, "\r\n\r\n");
         char *body = NULL;
 
-        if (body_start != NULL)
+        if (body_start == NULL || *(body_start + 4) == '\0')
         {
-            body = body_start + 4; // Body starts after the double newline sequence
-            LOG("[HTTP] Body:\n%s", body);
-            
-            if (*body == '\0')
-            {
-                // No body provided
-                LOG("[HTTP] No body provided: %s", method);
-                const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
-                write(client_socket, error_message, strlen(error_message));
-                close(client_socket);
-                free(key);
-                free(method);
-                free(csebase_name);
-                free(app_name);
-                free(container_name);
-                free(content_name);
-                return;
-            }
-        }
-
-        // Handle PUT request
-        LOG("[HTTP] PUT request received");
-        if (content_name != NULL)
-        {
-            // handle_request_content_put(&http_params, csebase_name, app_name, container_name, content_name, body);
-        }
-        else if (container_name != NULL)
-        {
-            if (strcmp(ty, "29") == 0) {
-                handle_schedule_update(&http_params, container_name, body);
-            } else {
-                handle_request_container_put(&http_params, csebase_name, app_name, container_name, request, body);
-            }
-        }
-        else if (app_name != NULL)
-        {
-            handle_request_ae_put(&http_params, csebase_name, app_name, request, body);
-        }
-        else
-        {
-            // Unsupported parameter scenario: csebase_name
-            LOG("[HTTP] Unsupported parameter scenario: %s", method);
-            const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
+            printf("[HTTP] No body provided: %s\n", method);
+            const char *error_message = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: 28\r\n\r\n{\"error\":\"No body provided\"}";
             write(client_socket, error_message, strlen(error_message));
             close(client_socket);
             free(key);
@@ -701,7 +681,36 @@ void handle_request(int client_socket)
             free(app_name);
             free(container_name);
             free(content_name);
+            free(action_name);
             return;
+        }
+        body = body_start + 4;
+        printf("[HTTP] Body:\n%s\n", body);
+
+        // Handle PUT request
+        LOG("[HTTP] PUT request received");
+        if (action_name != NULL && strcmp(ty, "65") == 0)
+        {
+            handle_request_action_put(&http_params, csebase_name, app_name, container_name, action_name, body);
+        }
+        else if (container_name != NULL)
+        {
+            if (strcmp(ty, "29") == 0) {
+                handle_schedule_update(&http_params, container_name, body);
+            } else {
+                handle_request_container_put(&http_params, csebase_name, app_name, container_name, body, body);
+            }
+        }
+        else if (app_name != NULL)
+        {
+            handle_request_ae_put(&http_params, csebase_name, app_name, body, body);
+        }
+        else
+        {
+            // Unsupported parameter scenario: csebase_name
+            LOG("[HTTP] Unsupported parameter scenario: %s", method);
+            const char *error_message = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
+            write(client_socket, error_message, strlen(error_message));
         }
     }
     else if (strcmp(method, "DELETE") == 0)
@@ -712,6 +721,14 @@ void handle_request(int client_socket)
         {
             handle_schedule_delete(&http_params, container_name);
         }
+        else if (action_name != NULL && strcmp(ty, "65") == 0)
+        {
+            handle_delete_action(client_socket, action_name);
+        }
+        else if (subscription_name != NULL && strcmp(ty, "23") == 0)
+        {
+            bool getSubscription = handle_delete_subscription(client_socket, subscription_name);
+        }
         else if (subscription_name == NULL && content_name == NULL && container_name != NULL && (strcmp(ty, "-1") != 0))
         {
             handle_request_container_delete(&http_params, csebase_name, app_name, container_name, "DELETE", NULL);
@@ -719,15 +736,6 @@ void handle_request(int client_socket)
         else if (subscription_name == NULL && content_name == NULL && app_name != NULL && (strcmp(ty, "-1") != 0))
         {
             handle_request_ae_delete(&http_params, csebase_name, app_name, "DELETE", NULL);
-        }
-        else if (subscription_name != NULL && strcmp(ty, "23") == 0) // Verify if it is a subscription to delete
-        {
-            //LOG("Subscription name exists in the url, %s", subscription_name);
-
-            // Delete subscription
-            bool getSubscription = handle_delete_subscription(client_socket, subscription_name);
-
-            //LOG("Ola1000000");
         }
         else
         {
@@ -743,6 +751,7 @@ void handle_request(int client_socket)
             free(container_name);
             free(content_name);
             free(subscription_name);
+            free(action_name);
             return;
         }
     }
@@ -753,6 +762,7 @@ void handle_request(int client_socket)
     free(app_name);
     free(container_name);
     free(content_name);
+    free(action_name);
 
     free(subscription_name);
     free(key);

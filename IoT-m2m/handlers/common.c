@@ -304,26 +304,47 @@ bool is_valid_string_plus_three_extra_chars(const char *str)
     return true;
 }
 
-void send_response(int client_socket, int status_code, const char* response) {
-    char http_response[4096];
-    const char* status_text = "OK";
-    
-    switch (status_code) {
-        case 200: status_text = "OK"; break;
-        case 201: status_text = "Created"; break;
-        case 400: status_text = "Bad Request"; break;
-        case 404: status_text = "Not Found"; break;
-        default: status_text = "Internal Server Error";
+void send_response(struct response_params *params, int status_code, const char *body)
+{
+    const char *status_text;
+    switch (status_code)
+    {
+    case 200: status_text = "OK"; break;
+    case 201: status_text = "Created"; break;
+    case 400: status_text = "Bad Request"; break;
+    case 404: status_text = "Not Found"; break;
+    case 422: status_text = "Unprocessable Entity"; break;
+    default:  status_text = "Internal Server Error"; break;
     }
 
-    snprintf(http_response, sizeof(http_response),
-             "HTTP/1.1 %d %s\r\n"
-             "Content-Type: application/json\r\n"
-             "Content-Length: %zu\r\n"
-             "\r\n"
-             "%s",
-             status_code, status_text,
-             strlen(response), response);
+    if (params->protocol && strcmp(params->protocol, "HTTP") == 0)
+    {
+        char http_response[4096];
+        if (body && strlen(body) > 0)
+            snprintf(http_response, sizeof(http_response),
+                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %zu\r\n\r\n%s",
+                     status_code, status_text, strlen(body), body);
+        else
+            snprintf(http_response, sizeof(http_response),
+                     "HTTP/1.1 %d %s\r\n\r\n", status_code, status_text);
 
-    send(client_socket, http_response, strlen(http_response), 0);
+        write(params->http_socket, http_response, strlen(http_response));
+    }
+    else if (params->protocol && strcmp(params->protocol, "COAP") == 0)
+    {
+        coap_pdu_code_t coap_code;
+        switch (status_code)
+        {
+        case 200: coap_code = COAP_RESPONSE_CODE_CONTENT; break;
+        case 201: coap_code = COAP_RESPONSE_CODE_CREATED; break;
+        case 400: coap_code = COAP_RESPONSE_CODE_BAD_REQUEST; break;
+        case 404: coap_code = COAP_RESPONSE_CODE_NOT_FOUND; break;
+        case 422: coap_code = COAP_RESPONSE_CODE_UNPROCESSABLE; break;
+        default:  coap_code = COAP_RESPONSE_CODE_INTERNAL_ERROR; break;
+        }
+
+        coap_pdu_set_code(params->coap_response, coap_code);
+        if (body && strlen(body) > 0)
+            coap_add_data(params->coap_response, strlen(body), (const uint8_t *)body);
+    }
 }
