@@ -256,6 +256,26 @@ void handle_request(int client_socket)
     }
     request[bytes_read] = '\0'; // Null-terminate
 
+    // For HTTP/1.1 keep-alive connections the body can arrive in a second TCP
+    // segment.  Read until Content-Length is satisfied.
+    char *hdr_end = strstr(request, "\r\n\r\n");
+    if (hdr_end) {
+        char *cl_ptr = strcasestr(request, "Content-Length:");
+        if (cl_ptr && cl_ptr < hdr_end) {
+            int content_length = atoi(cl_ptr + 15);
+            int header_bytes   = (int)((hdr_end + 4) - request);
+            int body_received  = (int)(bytes_read - header_bytes);
+            while (body_received < content_length && bytes_read < BUFFER_SIZE - 1) {
+                ssize_t more = read(client_socket, request + bytes_read,
+                                    (size_t)(BUFFER_SIZE - 1 - bytes_read));
+                if (more <= 0) break;
+                bytes_read += more;
+                request[bytes_read] = '\0';
+                body_received += (int)more;
+            }
+        }
+    }
+
     strncpy(request_copy, request, BUFFER_SIZE - 1); // Make a copy of the request
     
     // Get key on the request
