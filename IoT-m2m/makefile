@@ -18,6 +18,7 @@ SRCS = main.c \
        handlers/contentInstance.c \
        handlers/subscription.c \
        handlers/common.c \
+       handlers/action.c \
        handlers/mqtt_client.c \
        handlers/mqtt_handler.c \
 
