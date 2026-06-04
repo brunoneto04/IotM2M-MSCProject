@@ -14,6 +14,7 @@ Usage:
 
 import sys
 import time
+from datetime import datetime
 import requests
 
 HOST = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1:8080"
@@ -22,12 +23,20 @@ CSE  = "mn-name"     # must match the CSEBase rn configured on the server
 AE   = "schedTestAE"
 SCH  = "mySched"
 
-GREEN = "\033[92m"
-RED   = "\033[91m"
-RESET = "\033[0m"
+GREEN  = "\033[92m"
+RED    = "\033[91m"
+YELLOW = "\033[93m"
+RESET  = "\033[0m"
 
-passed = 0
-failed = 0
+passed  = 0
+failed  = 0
+skipped = 0
+
+
+def skip(label: str, reason: str) -> None:
+    global skipped
+    skipped += 1
+    print(f"{YELLOW}[SKIP]{RESET}  {label:48s}  {reason}")
 
 
 def check(label: str, resp: requests.Response, expected: int) -> requests.Response:
@@ -181,6 +190,94 @@ check(
     404
 )
 
+# ─── PUT updates sce ────────────────────────────────────────────────────────────
+
+print("\n=== PUT updates sce Test ===")
+
+SCH_PUT = "putSched"
+
+# Clean any leftover from a previous run
+requests.delete(f"{BASE}/{CSE}/{AE}/{SCH_PUT}?ty=29")
+
+# Create with an initial sce
+check(
+    "POST schedule for PUT-sce → 201",
+    requests.post(f"{BASE}/{CSE}/{AE}", json={
+        "m2m:sch": {
+            "rn": SCH_PUT,
+            "sce": "30 9 * * 1-5"
+        }
+    }),
+    201
+)
+
+# PUT a new sce
+check(
+    "PUT new sce → 200",
+    requests.put(f"{BASE}/{CSE}/{AE}/{SCH_PUT}?ty=29", json={
+        "m2m:sch": {
+            "sce": "0 0 * * 0"
+        }
+    }),
+    200
+)
+
+# GET and confirm the sce really changed
+r_put = check(
+    "GET after PUT-sce → 200",
+    requests.get(f"{BASE}/{CSE}/{AE}/{SCH_PUT}?ty=29"),
+    200
+)
+if r_put.status_code == 200:
+    new_sce = r_put.json()["m2m:sch"]["sce"]
+    if new_sce == "0 0 * * 0":
+        passed += 1
+        print(f"{GREEN}[PASS]{RESET}  {'PUT changed sce to 0 0 * * 0':48s}  sce={new_sce}")
+    else:
+        failed += 1
+        print(f"{RED}[FAIL]{RESET}  {'PUT changed sce to 0 0 * * 0':48s}  sce={new_sce} (expected '0 0 * * 0')")
+
+requests.delete(f"{BASE}/{CSE}/{AE}/{SCH_PUT}?ty=29")
+
+# ─── Scheduler fires ────────────────────────────────────────────────────────────
+
+print("\n=== Scheduler Trigger Test ===")
+
+SCH_TRIG = "trigSched"
+requests.delete(f"{BASE}/{CSE}/{AE}/{SCH_TRIG}?ty=29")
+
+# Build an sce that matches the current minute (minute hour * * *)
+now = datetime.now()
+trigger_sce = f"{now.minute} {now.hour} * * *"
+
+r_trig = requests.post(f"{BASE}/{CSE}/{AE}", json={
+    "m2m:sch": {
+        "rn": SCH_TRIG,
+        "sce": trigger_sce
+    }
+})
+
+if r_trig.status_code != 201:
+    skip(
+        "Scheduler triggers on matching minute",
+        f"could not create trigger schedule (HTTP {r_trig.status_code})"
+    )
+else:
+    # The scheduler runs server-side on a 60s tick and logs
+    # "[Scheduler] Schedule matched" / calls check_and_trigger_actions().
+    # This HTTP client has no access to the server's stderr, so it cannot
+    # observe the trigger. Mark as skipped rather than claim a false pass.
+    skip(
+        "Scheduler triggers on matching minute",
+        f"created sce='{trigger_sce}'; cannot capture server stderr from the "
+        "HTTP client. Verify manually: with ENABLE_LOGGING=1 the server logs "
+        "'[Scheduler] Schedule matched' within ~65s. Confirming the action "
+        "actually runs depends on the Actions module being linked (otherwise "
+        "the weak stub only logs)."
+    )
+
+requests.delete(f"{BASE}/{CSE}/{AE}/{SCH_TRIG}?ty=29")
+
 # ─── Teardown ─────────────────────────────────────────────────────────────────
 
 print("\n=== Teardown ===")
@@ -191,9 +288,11 @@ print(f"  AE '{AE}' removed (HTTP {r.status_code})")
 
 total = passed + failed
 print(f"\n{'─'*55}")
-print(f"  Passed: {passed}/{total}    Failed: {failed}/{total}")
+print(f"  Passed: {passed}/{total}    Failed: {failed}/{total}    Skipped: {skipped}")
 if failed == 0:
     print(f"{GREEN}  All tests passed.{RESET}")
+    if skipped:
+        print(f"{YELLOW}  ({skipped} skipped — see notes above.){RESET}")
 else:
     print(f"{RED}  {failed} test(s) failed.{RESET}")
     sys.exit(1)

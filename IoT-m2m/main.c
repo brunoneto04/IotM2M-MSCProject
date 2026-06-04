@@ -679,7 +679,7 @@ void handle_request(int client_socket)
         else if (container_name != NULL)
         {
             if (strcmp(ty, "29") == 0) {
-                handle_schedule_update(&http_params, container_name);
+                handle_schedule_update(&http_params, container_name, body);
             } else {
                 handle_request_container_put(&http_params, csebase_name, app_name, container_name, request, body);
             }

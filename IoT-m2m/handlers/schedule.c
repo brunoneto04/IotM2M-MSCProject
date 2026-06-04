@@ -188,22 +188,51 @@ void handle_schedule_retrieve(struct response_params *params, const char *identi
     sqlite3_close(db);
 }
 
-void handle_schedule_update(struct response_params *params, const char *identifier) {
+void handle_schedule_update(struct response_params *params, const char *identifier, const char *body) {
     char response[BUFFER_SIZE] = {0};
     sqlite3 *db;
-    
-    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+
+    /* Look for an optional new sce in the body: {"m2m:sch":{"sce":"..."}} */
+    const char *new_sce = NULL;
+    json_object *root = body ? json_tokener_parse(body) : NULL;
+    if (root) {
+        json_object *sch_obj, *sce_obj;
+        if (json_object_object_get_ex(root, "m2m:sch", &sch_obj) &&
+            json_object_object_get_ex(sch_obj, "sce", &sce_obj)) {
+            new_sce = json_object_get_string(sce_obj);
+        }
+    }
+
+    /* Validate the new sce (if provided) before touching the DB. */
+    if (new_sce && !is_valid_cron_format(new_sce)) {
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Invalid sce cron format. Expected '* * * * *'\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        if (root) json_object_put(root);
         return;
     }
 
-    // Currently handling the required PUT logic: Update 'lt' to reflect changes
-    const char *sql = "UPDATE schedules SET lt = datetime('now', 'localtime') WHERE ri = ? OR rn = ?";
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        if (root) json_object_put(root);
+        return;
+    }
+
+    /* With a valid sce, update both sce and lt; otherwise keep the old
+     * behaviour of only refreshing lt. */
     sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
+    if (new_sce) {
+        const char *sql = "UPDATE schedules SET sce = ?, lt = datetime('now', 'localtime') WHERE ri = ? OR rn = ?";
+        sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+        sqlite3_bind_text(stmt, 1, new_sce, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, identifier, -1, SQLITE_STATIC);
+    } else {
+        const char *sql = "UPDATE schedules SET lt = datetime('now', 'localtime') WHERE ri = ? OR rn = ?";
+        sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+        sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
+    }
 
     sqlite3_step(stmt);
     int changes = sqlite3_changes(db);
@@ -212,12 +241,17 @@ void handle_schedule_update(struct response_params *params, const char *identifi
 
     if (changes > 0) {
         LOG("[Schedule] Updated successfully: %s", identifier);
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated lt successfully\"}");
+        if (new_sce) {
+            snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated sce and lt successfully\"}");
+        } else {
+            snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated lt successfully\"}");
+        }
     } else {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\n\r\n");
     }
-    
+
     if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+    if (root) json_object_put(root);
 }
 
 void handle_schedule_delete(struct response_params *params, const char *identifier) {
