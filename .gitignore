@@ -5,3 +5,6 @@
 *.idea
 *.sh
 *.o
+IoT-m2m/makefile
+IoT-m2m/database/iotm2m.db
+IoT-m2m/iotm2m
