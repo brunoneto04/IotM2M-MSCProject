@@ -288,14 +288,11 @@ void handle_schedule_delete(struct response_params *params, const char *identifi
 // --- Background Scheduling logic (Phase 7.5) ---
 
 /*
- * check_and_trigger_actions() will be defined by action module.
- * The weak stub below allows linking without errors in the meantime.
- * Once object file is linked in, the linker will automatically
- * prefer his strong definition over this placeholder.
+ * The scheduler fires actions through check_and_trigger_actions(), whose single
+ * definition lives in the action module (handlers/action.c). We only need its
+ * prototype here to call it; the linker resolves it against action.o.
  */
-void __attribute__((weak)) check_and_trigger_actions(void) {
-    LOG("[Scheduler] check_and_trigger_actions() stub — action module not linked yet.");
-}
+void check_and_trigger_actions(void);
 
 static pthread_t       scheduler_tid;
 static pthread_mutex_t scheduler_mtx  = PTHREAD_MUTEX_INITIALIZER;
@@ -364,7 +361,11 @@ static void *scheduler_thread_func(void *arg) {
     LOG("[Scheduler] Background thread started.");
 
     while (1) {
-        /* Query every active schedule and fire on match. */
+        /* Query every active schedule and note whether any matches now.
+         * We must NOT call check_and_trigger_actions() while this read cursor
+         * is open: the open SELECT holds a SHARED lock on the database
+         */
+        int matched = 0;
         sqlite3 *db;
         if (sqlite3_open(DB_PATH, &db) == SQLITE_OK) {
             sqlite3_stmt *stmt;
@@ -374,13 +375,19 @@ static void *scheduler_thread_func(void *arg) {
                     const char *sce = (const char *)sqlite3_column_text(stmt, 0);
                     if (evaluate_schedule(sce)) {
                         LOG("[Scheduler] Schedule matched ('%s') — triggering actions.", sce);
-                        check_and_trigger_actions();
+                        matched = 1;
                     }
                 }
                 sqlite3_finalize(stmt);
             }
             sqlite3_close(db);
         }
+
+        /* Cursor released — now it is safe for the action handler to write.
+         * check_and_trigger_actions() re-evaluates the schedules itself, so a
+         * single call per tick is enough. */
+        if (matched)
+            check_and_trigger_actions();
 
         /* Wait 60 s (cron granularity) or wake immediately on stop signal. */
         struct timespec deadline;

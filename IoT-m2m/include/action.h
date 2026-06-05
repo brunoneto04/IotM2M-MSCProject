@@ -121,4 +121,9 @@ bool handle_get_action(int client_socket,
 bool handle_delete_action(int client_socket,
                           const char *resource_name);
 
+/* Schedule -> Action bridge. Strong override of the weak stub in schedule.c:
+ * the scheduler thread calls this when a <schedule> matches the current minute,
+ * and it runs the actions living in that schedule's AE (see action.c). */
+void check_and_trigger_actions(void);
+
 #endif //IOTM2M_ACTIONS_H

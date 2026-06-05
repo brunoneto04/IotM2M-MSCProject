@@ -13,6 +13,8 @@ AUTHORSHIP -------------------------------------------------
 
 #include "../include/action.h"
 #include "../include/container.h"
+#include "../include/schedule.h"
+#include "../include/contentInstance.h"
 #include <sqlite3.h>
 #include <json-c/json.h>
 #include <stdio.h>
@@ -883,3 +885,150 @@ bool handle_delete_action(int client_socket,
     return true;
 }
 
+#define MAX_TRIGGERED_ACTIONS 256
+
+/*
+ * acp="CREATE" -> create a <contentInstance> under ori with con=inp, reusing
+ * the existing cin handler with an internal (no-socket) response_params so we
+ * keep container quota and subscription notifications. Safe to call from the
+ * scheduler thread because the scheduler releases its DB cursor before firing
+ * (see scheduler_thread_func in schedule.c).
+ */
+static void perform_action_primitive(const char *acp, const char *ori, const char *inp)
+{
+    if (!acp || strcmp(acp, "CREATE") != 0) {
+        LOG_ERROR("[Action] primitive '%s' not supported yet (only CREATE).", acp ? acp : "(null)");
+        return;
+    }
+    if (!ori || ori[0] == '\0') {
+        LOG_ERROR("[Action] CREATE skipped: empty object resource id (ori).");
+        return;
+    }
+
+    /* Parse ori = "[/]cse/ae/container" into its three name segments. */
+    char path[512];
+    strncpy(path, ori[0] == '/' ? ori + 1 : ori, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    char *cse = strtok(path, "/");
+    char *ae  = cse ? strtok(NULL, "/") : NULL;
+    char *cnt = ae  ? strtok(NULL, "/") : NULL;
+    if (!cse || !ae || !cnt) {
+        LOG_ERROR("[Action] CREATE: ori '%s' is not '/cse/ae/container'.", ori);
+        return;
+    }
+
+    /* handle_request_cin_post validates X-M2M-Origin against the AE's ri. */
+    char ae_ri[64] = {0};
+    sqlite3 *db;
+    if (sqlite3_open(DB_PATH, &db) == SQLITE_OK) {
+        get_ri_for_rn(db, ae, ae_ri, sizeof(ae_ri));
+        sqlite3_close(db);
+    }
+    if (ae_ri[0] == '\0') {
+        LOG_ERROR("[Action] CREATE: could not resolve AE '%s' to a resource id.", ae);
+        return;
+    }
+
+    json_object *root = json_object_new_object();
+    json_object *cin  = json_object_new_object();
+    json_object_object_add(cin, "con", json_object_new_string(inp ? inp : ""));
+    json_object_object_add(root, "m2m:cin", cin);
+    char *body = strdup(json_object_to_json_string(root));
+    json_object_put(root);
+
+    char request[160];
+    snprintf(request, sizeof(request), "X-M2M-Origin: %s\r\n\r\n", ae_ri);
+
+    struct response_params iparams = {
+        .http_socket = -1, .coap_session = NULL, .coap_response = NULL,
+        .protocol = "INTERNAL"   /* neither HTTP nor COAP => no socket writes */
+    };
+
+    LOG("[Action] CREATE cin under %s/%s/%s con='%s'", cse, ae, cnt, inp ? inp : "");
+    handle_request_cin_post(&iparams, cse, ae, cnt, request, body);
+    free(body);
+}
+
+/* Strong override of the weak stub in schedule.c. */
+void check_and_trigger_actions(void)
+{
+    /* The scheduler thread calls us once per matching schedule, so several
+     * calls can land in the same 60 s tick. Run the real work at most once per
+     * minute. Only the scheduler thread touches this, so no locking needed. */
+    static int last_stamp = -1;
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int stamp = (((t->tm_year * 366 + t->tm_yday) * 24) + t->tm_hour) * 60 + t->tm_min;
+    if (stamp == last_stamp) return;
+    last_stamp = stamp;
+
+    sqlite3 *db;
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
+        LOG_ERROR("[Action] could not open DB: %s", sqlite3_errmsg(db));
+        return;
+    }
+
+    /* schedule -> its AE (by name or ri) -> containers -> actions in them */
+    const char *sql =
+        "SELECT a.ri, s.sce, a.action_primitive, a.object_resource_id, a.input "
+        "FROM schedules s "
+        "JOIN resources ae  ON (ae.rn = s.pi OR ae.ri = s.pi) "
+        "JOIN resources cnt ON cnt.pi = ae.ri "
+        "JOIN resources act ON act.pi = cnt.ri AND act.ty = 65 "
+        "JOIN actions   a   ON a.ri = act.ri";
+
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        LOG_ERROR("[Action] trigger query failed: %s", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return;
+    }
+
+    /* Collect (deduped by action ri) first, then close the read connection
+     * before executing — the cin handler opens its own connection and we don't
+     * want two live connections fighting over the SQLite file lock. */
+    char *p_ri[MAX_TRIGGERED_ACTIONS];
+    char *p_acp[MAX_TRIGGERED_ACTIONS];
+    char *p_ori[MAX_TRIGGERED_ACTIONS];
+    char *p_inp[MAX_TRIGGERED_ACTIONS];
+    int n = 0;
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *sce = (const char *)sqlite3_column_text(stmt, 1);
+        if (!evaluate_schedule(sce)) continue;
+
+        const char *ri = (const char *)sqlite3_column_text(stmt, 0);
+
+        /* Skip if this action was already collected via another matching
+         * schedule under the same AE (avoid double execution this minute). */
+        int dup = 0;
+        for (int i = 0; i < n; i++)
+            if (p_ri[i] && ri && strcmp(p_ri[i], ri) == 0) { dup = 1; break; }
+        if (dup) continue;
+
+        if (n >= MAX_TRIGGERED_ACTIONS) {
+            LOG_ERROR("[Action] more than %d actions triggered this minute; dropping surplus.",
+                      MAX_TRIGGERED_ACTIONS);
+            break;
+        }
+
+        const char *acp = (const char *)sqlite3_column_text(stmt, 2);
+        const char *ori = (const char *)sqlite3_column_text(stmt, 3);
+        const char *inp = (const char *)sqlite3_column_text(stmt, 4);
+        p_ri[n]  = ri  ? strdup(ri)  : NULL;
+        p_acp[n] = acp ? strdup(acp) : NULL;
+        p_ori[n] = ori ? strdup(ori) : NULL;
+        p_inp[n] = inp ? strdup(inp) : NULL;
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+
+    if (n == 0) return;
+
+    LOG("[Action] %d action(s) triggered by schedule this minute.", n);
+    for (int i = 0; i < n; i++) {
+        perform_action_primitive(p_acp[i], p_ori[i], p_inp[i]);
+        free(p_ri[i]); free(p_acp[i]); free(p_ori[i]); free(p_inp[i]);
+    }
+}
