@@ -1,322 +1,313 @@
-# IoT-m2m — oneM2M CSE Server
+# IotM2M — MSC Project
 
-oneM2M CSE server written in C with HTTP, CoAP, and MQTT support.
-Implements the following resource types: CSEBase, AE, Container, ContentInstance, Subscription, and Schedule.
+Project on **IoT / M2M** built around a [**oneM2M**](https://www.onem2m.org/)
+**CSE** (Common Services Entity) server written in **C**, with a **SQLite** backend
+and support for three protocols — **HTTP**, **CoAP** and **MQTT**.
+
+The main deliverable is the CSE server in [`IoT-m2m/`](IoT-m2m/). The remaining
+folders provide supporting material: Python test clients and an early standalone
+HTTP experiment.
 
 ---
 
 ## Table of contents
 
-1. [System requirements](#1-system-requirements)
-2. [Install dependencies](#2-install-dependencies)
-3. [Build](#3-build)
-4. [Initialise the database](#4-initialise-the-database)
-5. [Run the server](#5-run-the-server)
-6. [Test](#6-test)
-7. [Stop the server](#7-stop-the-server)
-8. [Debug and memory](#8-debug-and-memory)
+1. [Repository layout](#repository-layout)
+2. [Architecture overview](#architecture-overview)
+3. [Resource model](#resource-model)
+4. [Database schema](#database-schema)
+5. [Components](#components)
+6. [Quick start](#quick-start)
+7. [API examples](#api-examples)
+8. [Schedule → Action automation](#schedule--action-automation)
+9. [Testing](#testing)
+10. [Requirements](#requirements)
+11. [Documentation index](#documentation-index)
+12. [Notes & known limitations](#notes--known-limitations)
 
 ---
 
-## 1. System requirements
+## Repository layout
 
-- Ubuntu 22.04 / 24.04 (or WSL2 with Ubuntu 24.04)
-- GCC 13+
-- CMake 3.16+ (to build libcoap and paho-mqtt from source)
-
----
-
-## 2. Install dependencies
-
-Run these commands **in order**.
-
-### 2.1 Base toolchain
-```bash
-sudo apt update
-sudo apt install -y build-essential cmake git gdb valgrind
 ```
-
-### 2.2 Libraries available via apt
-```bash
-sudo apt install -y \
-    libsqlite3-dev \
-    libjson-c-dev \
-    libssl-dev \
-    libcurl4-openssl-dev \
-    mosquitto \
-    mosquitto-clients
-```
-
-### 2.3 libcoap-3
-
-**Option A — apt (Ubuntu 22.04/24.04, recommended):**
-```bash
-sudo apt install -y libcoap3-dev libcoap3
-# Ubuntu 24.04 installs the OpenSSL variant: libcoap-3-openssl
-# The makefile already uses -lcoap-3-openssl for compatibility.
-```
-
-**Option B — build from source (if apt unavailable):**
-```bash
-git clone https://github.com/obgm/libcoap.git
-cd libcoap
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release \
-      -DENABLE_TESTS=OFF \
-      -DENABLE_EXAMPLES=OFF \
-      -DENABLE_DOCUMENTATION=OFF ..
-make -j$(nproc)
-sudo make install
-sudo ldconfig
-cd ../..
-# Verify:
-pkg-config --modversion libcoap-3
-```
-
-### 2.4 paho-mqtt C client
-
-**Option A — apt (Ubuntu 24.04+):**
-```bash
-sudo apt install -y libpaho-mqtt-dev
-```
-
-**Option B — build from source (if apt fails):**
-```bash
-git clone https://github.com/eclipse/paho.mqtt.c.git
-cd paho.mqtt.c
-cmake -Bbuild \
-      -DPAHO_WITH_SSL=ON \
-      -DPAHO_BUILD_STATIC=OFF \
-      -DCMAKE_INSTALL_PREFIX=/usr/local
-cmake --build build --target install -j$(nproc)
-sudo ldconfig
-cd ..
-```
-
-### 2.5 Verify all libraries
-```bash
-pkg-config --modversion libcoap-3 json-c sqlite3 libssl libcurl
-ls /usr/local/lib/libpaho* /usr/lib/libpaho* 2>/dev/null
+IotM2M-MSCProject/
+├── IoT-m2m/            # ★ Main oneM2M CSE server (C) — HTTP + CoAP + MQTT
+│   ├── main.c / main.h         # Startup, HTTP/CoAP routing, threads
+│   ├── makefile
+│   ├── handlers/               # Per-resource logic (one module per resource)
+│   ├── include/                # Public headers
+│   ├── database/               # SQL schema + generated SQLite DB
+│   ├── READ_ME/                # Reference notes (API requests, VM setup, legacy SQL)
+│   ├── README.md               # Full build/run/test guide for the server
+│   └── SCHEDULE_ACTION_INTEGRATION.md   # Schedule→Action deep-dive
+├── CoAP_Client/        # Python test clients (aiocoap) + Schedule HTTP test suite
+└── HTTP-Server-c/      # Minimal standalone HTTP server experiment (port 8069)
 ```
 
 ---
 
-## 3. Build
+## Architecture overview
+
+The CSE server (`IoT-m2m/`) is a single process that, on startup, creates the
+CSEBase and launches a set of background threads:
+
+| Thread | Source | Role |
+|--------|--------|------|
+| HTTP server | `start_web_server` (`main.c`) | Listens on TCP **8080**, parses requests, routes to handlers |
+| CoAP server | `start_coap_server` (`main.c`) | Listens on UDP **5683** via libcoap, single unknown-resource handler |
+| Expiry cleanup | `check_and_delete_expired_resources` (`main.c`) | Periodically deletes resources past their `et` (expirationTime) |
+| Scheduler | `scheduler_thread_func` (`handlers/schedule.c`) | Wakes every **60 s**, evaluates Schedule cron expressions, triggers Actions |
+
+The MQTT client (`handlers/mqtt_client.c`, paho) delivers **subscription
+notifications** over an external broker (default MQTT port **1883**), alongside HTTP
+notifications.
+
+```
+            ┌──────────── HTTP :8080 ───────────┐
+ clients ──▶│                                   │
+            ├──────────── CoAP :5683 ───────────┤──▶  request router ──▶ resource handlers ──▶ SQLite
+            │                                   │                                                (iotm2m.db)
+            └─ MQTT :1883 (notifications out) ◀─┘
+                                                          ▲
+                          scheduler thread (60 s) ────────┘  (internal Schedule→Action trigger)
+```
+
+> Each resource type maps to its own `.c`/`.h` module under `handlers/` and
+> `include/`. Persistence is shared: a generic `resources` table holds the common
+> attributes, and one table per resource type holds the specifics (see
+> [Database schema](#database-schema)).
+
+---
+
+## Resource model
+
+Resources form the standard oneM2M containment tree, rooted at the CSEBase:
+
+```
+CSEBase (mn-name)
+└── AE (m2m:ae)
+    ├── Container (m2m:cnt)
+    │   ├── ContentInstance (m2m:cin)
+    │   ├── Subscription (m2m:sub)
+    │   └── Action (m2m:act)
+    ├── Schedule (m2m:sch)
+    └── Subscription (m2m:sub)
+```
+## Database schema
+
+SQLite database at `IoT-m2m/database/iotm2m.db`, schema in
+`IoT-m2m/database/create_tables.sql`. A generic `resources` table stores the common
+attributes (`ty`, `ri`, `rn`, `pi`, `ct`, `lt`) with a self-referencing `pi → ri`
+foreign key; specialised tables extend each resource:
+
+| Table | Holds |
+|-------|-------|
+| `resources` | Common attributes for every resource (the containment tree) |
+| `cse_bases` | `csi`, `cst` |
+| `application_entities` | `api`, `aei`, `rr`, `et` |
+| `containers` | `st`, `cni`, `cbs`, `mbs`, `mia`, `mni`, `et` |
+| `content_instances` | `con`, `cs`, `st`, `et` |
+| `subscriptions` | `notification_uris`, `notification_type`, `event_type`, … |
+| `actions` | `eval_criteria_*`, `eval_mode`, `object_resource_id`, `action_primitive`, `input`, … |
+| `schedules` | `sce` (cron expression), `et` |
+| `points_of_access`, `supported_resource_types`, `access_control_policy_ids`, `content_serializations`, `supported_release_versions`, `labels` | Multi-valued attributes (one row per value) |
+
+The server verifies/creates all tables on startup. To reset manually:
 
 ```bash
-# Enter the server directory
 cd IoT-m2m
+sqlite3 database/iotm2m.db < database/create_tables.sql   # (re)create schema
+sqlite3 database/iotm2m.db ".schema"                      # inspect
+```
 
-# Normal build (no logs)
-make
+> A fresh clone may ship an outdated `iotm2m.db`; regenerate it from
+> `create_tables.sql` so the `actions`/`schedules` tables exist before use.
 
-# Build with logging enabled (recommended for development)
+---
+
+## Components
+
+### 1. `IoT-m2m/` — oneM2M CSE server ★
+
+The core deliverable. A multi-threaded oneM2M CSE server in C with a SQLite
+backend. See **[`IoT-m2m/README.md`](IoT-m2m/README.md)** for the complete
+dependency/build/run/test guide. Highlights:
+
+- Full CRUD for the resource types above, persisted in SQLite.
+- **Subscriptions** with HTTP and MQTT notification delivery.
+- **Schedule** resource with a 5-field Unix cron `sce` and a 60 s evaluation thread.
+- **Action** resource with CRUD plus a **Schedule → Action** execution bridge.
+- Automatic expired-resource cleanup.
+- Compile-time toggles per protocol (`ENABLE_HTTP`, `ENABLE_COAP`, `ENABLE_MQTT`)
+  and logging (`ENABLE_LOGGING=1`).
+
+**Default ports:** HTTP `8080`, CoAP/UDP `5683`, MQTT `1883` (external broker).
+
+### 2. `CoAP_Client/` — test clients
+
+Python clients used to exercise the running server:
+
+| File | Protocol | Purpose |
+|------|----------|---------|
+| `client_test_AE.py` | CoAP | Create/inspect an AE |
+| `client_test_Container.py` | CoAP | Create/inspect a Container |
+| `client_test_ContentInstance.py` | CoAP | Create/inspect ContentInstances |
+| `test_schedule.py` | HTTP | Full Schedule CRUD test suite |
+| `define_ip.py` | — | Sets the target server IP for the CoAP clients |
+
+CoAP clients require [`aiocoap`](https://aiocoap.readthedocs.io/); the Schedule
+suite requires `requests`. Set the server IP in `define_ip.py` before running the
+CoAP clients.
+
+### 3. `HTTP-Server-c/` — minimal HTTP server experiment
+
+A standalone, single-file C HTTP server (`http-server.c`) that always replies
+`200 OK`. An early proof of concept, **independent** of the CSE server. Listens on
+port **8069**.
+
+```bash
+cd HTTP-Server-c
+gcc http-server.c -o http-server
+./http-server
+```
+
+---
+
+## Quick start
+
+```bash
+# 1. Build the CSE server (with logs, recommended for development)
+cd IoT-m2m
 make ENABLE_LOGGING=1
 
-# Clean build artifacts
-make clean
-```
-
-> **WSL2 note:** if `gcc` is not found, install it with `sudo apt install build-essential`.
-
-### Available makefile flags
-
-| Flag | Effect |
-|------|--------|
-| `ENABLE_LOGGING=1` | Enables LOG/LOG_ERROR macros on stderr |
-| `-DENABLE_HTTP` | On by default — HTTP server on port 8080 |
-| `-DENABLE_COAP` | On by default — CoAP server on port 5683 |
-| `-DENABLE_MQTT` | On by default — MQTT client |
-
-To build **without** a module (e.g. without MQTT while developing):
-```bash
-# Temporarily comment out the relevant line in the makefile:
-# CFLAGS += -DENABLE_MQTT
-```
-
----
-
-## 4. Initialise the database
-
-The server creates all tables automatically on startup.
-To inspect or reset manually:
-
-```bash
-# Create/reset all tables
+# 2. (Optional) (re)create the database schema
 sqlite3 database/iotm2m.db < database/create_tables.sql
 
-# Inspect schema
-sqlite3 database/iotm2m.db ".schema"
-
-# Delete all data (keep structure)
-sqlite3 database/iotm2m.db "
-  DELETE FROM schedules;
-  DELETE FROM content_instances;
-  DELETE FROM containers;
-  DELETE FROM application_entities;
-  DELETE FROM cse_bases;
-"
-```
-
----
-
-## 5. Run the server
-
-```bash
-cd IoT-m2m
+# 3. Run — you will be prompted for the CSEBase resourceName (default: mn-name)
 ./iotm2m
 ```
 
-On startup the server:
-1. Creates/verifies all tables (including `schedules`)
-2. Starts the HTTP thread (port **8080**)
-3. Starts the CoAP thread (port **5683**)
-4. Starts the expired-resource cleanup thread
-5. Starts the **schedule evaluation thread** (runs every 60 s)
+On startup the server creates the CSEBase, then starts the HTTP (8080), CoAP
+(5683), expiry-cleanup and scheduler threads. Stop it cleanly with `Ctrl+C`
+(handles `SIGINT`/`SIGTERM` and joins the scheduler thread).
 
-Expected output with `ENABLE_LOGGING=1`:
-```
-[LOG] [DB] 'schedules' table verified/initialized successfully.
-[LOG] [HTTP] Server listening on port 8080...
-[LOG] [CoAP] Server listening on port 5683...
-[LOG] [Scheduler] Thread created.
-[LOG] [Scheduler] Background thread started.
-```
-
-### Ports used
-
-| Protocol | Port | Compile flag |
-|----------|------|--------------|
-| HTTP     | 8080 | `ENABLE_HTTP` |
-| CoAP/UDP | 5683 | `ENABLE_COAP` |
-| MQTT     | 1883 | `ENABLE_MQTT` (external broker) |
+Full dependency and build details (libcoap, paho-mqtt, build flags, valgrind, etc.):
+**[`IoT-m2m/README.md`](IoT-m2m/README.md)**.
 
 ---
 
-## 6. Test
+## API examples
 
-### 6.1 Manual tests with curl
+Assuming `HOST=127.0.0.1:8080` and the default CSEBase `mn-name`:
 
 ```bash
 HOST=127.0.0.1:8080
 CSE=mn-name
 
-# Create AE
+# Create an AE
 curl -s -X POST http://$HOST/$CSE \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json;ty=2" -H "X-M2M-Origin: CAdmin" \
   -d '{"m2m:ae":{"rn":"sensorAE","api":"N01.com.test","rr":true,"srv":["3"],"poa":["http://127.0.0.1:8080"]}}'
 
-# Create Schedule
+# Create a Container under the AE
+curl -s -X POST http://$HOST/$CSE/sensorAE \
+  -H "Content-Type: application/json;ty=3" \
+  -d '{"m2m:cnt":{"rn":"temp","mni":100,"mbs":100000}}'
+
+# Add a ContentInstance (data point)
+curl -s -X POST http://$HOST/$CSE/sensorAE/temp \
+  -H "Content-Type: application/json;ty=4" \
+  -d '{"m2m:cin":{"con":"21.5"}}'
+
+# Read the latest ContentInstance
+curl -s "http://$HOST/$CSE/sensorAE/temp/la?ty=4"
+
+# Create a Schedule under the AE (weekdays at 09:30)
 curl -s -X POST http://$HOST/$CSE/sensorAE \
   -H "Content-Type: application/json" \
   -d '{"m2m:sch":{"rn":"mySched","sce":"30 9 * * 1-5"}}'
-
-# GET Schedule
-curl -s http://$HOST/$CSE/sensorAE/mySched?ty=29
-
-# PUT Schedule (updates lt)
-curl -s -X PUT "http://$HOST/$CSE/sensorAE/mySched?ty=29" \
-  -H "Content-Type: application/json" \
-  -d '{"m2m:sch":{}}'
-
-# DELETE Schedule
-curl -s -X DELETE "http://$HOST/$CSE/sensorAE/mySched?ty=29"
 ```
 
-### 6.2 Automated test suite (Schedule)
+More request/response examples (headers, status codes, full bodies) are in
+[`IoT-m2m/READ_ME/API Requests.txt`](IoT-m2m/READ_ME/).
+
+---
+
+## Schedule → Action automation
+
+The standout feature: a **Schedule** can trigger an **Action** at a given time —
+*"at this time, run this action"*.
+
+- A **Schedule** holds a 5-field Unix cron expression in `sce`
+  (`minute hour day-of-month month day-of-week`; supports `*`, lists `1,3`,
+  ranges `1-5`, steps `*/2`).
+- An **Action** describes what to do — currently the `CREATE` primitive
+  creates a `<contentInstance>` (`con = inp`) under its target (`ori`).
+- The scheduler thread evaluates every schedule once per minute; on a match it
+  triggers the actions living under the **containers of the schedule's AE** (linked
+  by shared ancestry).
+
+---
+
+## Testing
 
 ```bash
-# Install requests if needed
+# Schedule HTTP suite (server must be running)
 pip3 install requests
+python3 CoAP_Client/test_schedule.py [HOST]      # default HOST: 127.0.0.1:8080
+# Covers: POST 201, duplicate POST 403, GET 200/404, PUT 200, DELETE 200/404
 
-# Run tests (server must be running)
-python3 CoAP_Client/test_schedule.py
-
-# Server on another host
-python3 CoAP_Client/test_schedule.py 192.168.1.30:8080
-```
-
-Scenarios covered: POST 201, duplicate POST 403, GET 200/404, PUT 200, DELETE 200/404.
-
-### 6.3 CoAP tests (Python aiocoap)
-
-```bash
+# CoAP clients (set the server IP in CoAP_Client/define_ip.py first)
 pip3 install aiocoap
-
 python3 CoAP_Client/client_test_AE.py
 python3 CoAP_Client/client_test_Container.py
 python3 CoAP_Client/client_test_ContentInstance.py
+
+# Memory checks
+cd IoT-m2m && valgrind --leak-check=full ./iotm2m
 ```
 
-> Edit `CoAP_Client/define_ip.py` to point to the correct IP before running.
-
-### 6.4 Testing the scheduler thread
-
-Create a schedule that fires **in the current minute**:
-```bash
-MIN=$(date +%-M)
-curl -s -X POST http://127.0.0.1:8080/mn-name/sensorAE \
-  -H "Content-Type: application/json" \
-  -d "{\"m2m:sch\":{\"rn\":\"nowSched\",\"sce\":\"$MIN * * * *\"}}"
-```
-Wait up to 60 s. The log will show:
-```
-[LOG] [Scheduler] Schedule matched ('42 * * * *') — triggering actions.
-```
+To exercise the scheduler quickly, create a schedule that fires in the current
+minute (`sce` of `"* * * * *"`) and watch the logs (built with `ENABLE_LOGGING=1`)
+for `[Scheduler] Schedule matched (...)`.
 
 ---
 
-## 7. Stop the server
+## Requirements
 
-```bash
-Ctrl+C
-```
+- Ubuntu 22.04 / 24.04 (or WSL2 with Ubuntu 24.04)
+- GCC 13+, CMake 3.16+ (CMake only needed if building libcoap / paho-mqtt from source)
+- Libraries: `libsqlite3-dev`, `libjson-c-dev`, `libssl-dev`, `libcurl4-openssl-dev`,
+  `libcoap3-dev`, paho-mqtt C client, plus `mosquitto` / `mosquitto-clients` for MQTT.
 
-The server handles `SIGINT`/`SIGTERM`:
-1. Stops accepting new connections
-2. Signals all threads to exit
-3. Waits for the scheduler thread to join cleanly
-4. Exits
-
-Expected output:
-```
-[LOG] [Scheduler] Thread joined cleanly.
-[HTTP] Server stopped.
-```
+Exact install commands are in
+[`IoT-m2m/README.md`](IoT-m2m/README.md#2-install-dependencies).
 
 ---
 
-## 8. Debug and memory
+## Documentation index
 
-```bash
-# Run with valgrind (leak detection)
-valgrind --leak-check=full --show-leak-kinds=all ./iotm2m
+| Document | Scope |
+|----------|-------|
+| [`IoT-m2m/README.md`](IoT-m2m/README.md) | Full setup, build, run, database and testing guide for the CSE server |
+| [`IoT-m2m/READ_ME/`](IoT-m2m/READ_ME/) | Reference notes: example API requests, VM configuration, legacy SQL schema |
+| [`CoAP_Client/READ_ME.txt`](CoAP_Client/READ_ME.txt) | How to run the Python CoAP clients |
 
-# Run with valgrind + logging
-make ENABLE_LOGGING=1 && valgrind --leak-check=full ./iotm2m
-```
+---
 
-### Project structure
+## Notes & known limitations
 
-```
-IoT-m2m/
-├── main.c / main.h          # Startup, HTTP/CoAP routing, expiry thread
-├── makefile
-├── database/
-│   ├── create_tables.sql    # SQL schema
-│   └── iotm2m.db            # SQLite database (generated at runtime)
-├── handlers/
-│   ├── ae.c                 # Application Entity
-│   ├── cseBase.c            # CSEBase
-│   ├── container.c          # Container
-│   ├── contentInstance.c    # ContentInstance
-│   ├── subscription.c       # Subscription + MQTT/HTTP notifications
-│   ├── schedule.c           # Schedule CRUD + background scheduler thread
-│   ├── mqtt_client.c        # MQTT client (paho)
-│   ├── mqtt_handler.c       # MQTT message handler
-│   └── common.c             # Shared utilities
-└── include/
-    ├── schedule.h           # Public scheduler API
-    ├── logger.h             # LOG / LOG_ERROR macros
-    └── ...
+- **CSEBase startup is interactive:** running `./iotm2m` prompts for the CSEBase
+  resourceName (default `mn-name`) and whether to recreate it.
+- **Scheduler granularity is 1 minute:** the cron has 5 fields (no seconds/year) and
+  the evaluation thread wakes every 60 s.
+- **Only the `CREATE` action primitive is wired up;** other primitives are logged as
+  not yet supported.
+- **Schedule→Action linking is at AE level** (shared ancestry), not 1-to-1.
+- **SQLite has no `busy_timeout`,** so concurrent access can occasionally log a
+  benign `database is locked` from the cleanup thread (see the integration doc).
+- **Committed `iotm2m.db` may be stale:** regenerate from `create_tables.sql` on a
+  fresh clone so the `actions`/`schedules` tables exist.
+- **Aggressive `.gitignore`:** docs, the makefile and other files are untracked by
+  default — see [Version control & `.gitignore`](#version-control--gitignore).
 ```
