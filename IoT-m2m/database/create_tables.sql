@@ -95,17 +95,15 @@ CREATE TABLE labels
 
 CREATE TABLE subscriptions
 (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    ri                 TEXT NOT NULL UNIQUE,
-    resource_name      TEXT NOT NULL UNIQUE,
-    resource_uri       TEXT NOT NULL,
-    notification_uris  TEXT NOT NULL,
-    notification_type  INTEGER,
-    event_type         TEXT,
-    content_type       TEXT,
-    originator         TEXT,
-    creation_time      TEXT,
-    last_modified_time TEXT
+    ri                TEXT NOT NULL UNIQUE,
+    resource_uri      TEXT NOT NULL,
+    notification_uris TEXT NOT NULL,
+    notification_type INTEGER,
+    event_type        TEXT,
+    content_type      TEXT,
+    originator        TEXT,
+    PRIMARY KEY (ri),
+    FOREIGN KEY (ri) REFERENCES resources (ri)
 );
 CREATE TABLE actions
 (

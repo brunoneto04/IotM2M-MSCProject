@@ -110,67 +110,68 @@ bool create_subscription(const Subscription *sub)
     sqlite3 *db;
     sqlite3_stmt *stmt;
 
-    int rc = sqlite3_open(DB_PATH, &db);
-    if (rc != SQLITE_OK)
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK)
         return false;
 
-        const char *create_table =
-        "CREATE TABLE IF NOT EXISTS subscriptions ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "ri TEXT NOT NULL UNIQUE,"
-        "resource_name TEXT NOT NULL UNIQUE,"
-        "resource_uri TEXT NOT NULL,"
-        "notification_uris TEXT NOT NULL,"
-        "notification_type INTEGER,"
-        "event_type TEXT,"
-        "content_type TEXT,"
-        "originator TEXT,"
-        "creation_time TEXT,"
-        "last_modified_time TEXT"
-        ");";
+    sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
 
-    rc = sqlite3_exec(db, create_table, 0, 0, 0);
+    /* Insert into shared resources table */
+    const char *sql_res =
+        "INSERT INTO resources (ty, ri, rn, pi, ct, lt) "
+        "VALUES (23, ?, ?, ?, ?, ?)";
+    int rc = sqlite3_prepare_v2(db, sql_res, -1, &stmt, 0);
     if (rc != SQLITE_OK)
     {
-        fprintf(stderr, "Erro ao criar tabela: %s\n", sqlite3_errmsg(db));
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
         sqlite3_close(db);
         return false;
     }
-
-    const char *sql =
-    "INSERT INTO subscriptions ("
-    "ri, resource_name, resource_uri, notification_uris, notification_type, "
-    "event_type, content_type, originator, creation_time, last_modified_time"
-    ") VALUES (?,?,?,?,?,?,?,?,?,?);";
-
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    if (rc != SQLITE_OK)
-    {
-        sqlite3_close(db);
-        return false;
-    }
-
-    sqlite3_bind_text(stmt, 1, sub->resource_id, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, sub->resource_name, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, sub->resource_uri, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, sub->notification_uris, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 5, sub->notification_type);
-    sqlite3_bind_text(stmt, 6, sub->event_type_str, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 7, sub->content_type, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 8, sub->originator, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 9, sub->creation_time, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 10, sub->last_modified_time, -1, SQLITE_STATIC);
-
+    sqlite3_bind_text(stmt, 1, sub->resource_id,        -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, sub->resource_name,      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, sub->parent_id,          -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 4, sub->creation_time,      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 5, sub->last_modified_time, -1, SQLITE_STATIC);
     rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    if (rc != SQLITE_DONE)
+    {
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
+        sqlite3_close(db);
+        return false;
+    }
+
+    /* Insert subscription-specific fields */
+    const char *sql_sub =
+        "INSERT INTO subscriptions "
+        "(ri, resource_uri, notification_uris, notification_type, event_type, content_type, originator) "
+        "VALUES (?,?,?,?,?,?,?)";
+    rc = sqlite3_prepare_v2(db, sql_sub, -1, &stmt, 0);
+    if (rc != SQLITE_OK)
+    {
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
+        sqlite3_close(db);
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, sub->resource_id,       -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, sub->resource_uri,      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 3, sub->notification_uris, -1, SQLITE_STATIC);
+    sqlite3_bind_int (stmt, 4, sub->notification_type);
+    sqlite3_bind_text(stmt, 5, sub->event_type_str,    -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 6, sub->content_type,      -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 7, sub->originator,        -1, SQLITE_STATIC);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
     if (rc != SQLITE_DONE)
     {
         fprintf(stderr, "Erro ao inserir subscription: %s\n", sqlite3_errmsg(db));
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
+        sqlite3_close(db);
+        return false;
     }
 
-    sqlite3_finalize(stmt);
+    sqlite3_exec(db, "COMMIT TRANSACTION", 0, 0, 0);
     sqlite3_close(db);
-
-    return rc == SQLITE_DONE;
+    return true;
 }
 
 //Structure for generating a unique Request Identifier
@@ -330,43 +331,48 @@ bool get_subscription(const char *resource_name, Subscription *sub)
     sqlite3 *db;
     sqlite3_stmt *stmt;
 
-    int rc = sqlite3_open(DB_PATH, &db);
-    if (rc != SQLITE_OK)
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK)
         return false;
 
-    const char *sql = "SELECT * FROM subscriptions WHERE resource_name = ?";
+    const char *sql =
+        "SELECT r.ri, r.rn, r.pi, r.ct, r.lt, "
+        "s.resource_uri, s.notification_uris, s.notification_type, "
+        "s.event_type, s.content_type, s.originator "
+        "FROM resources r JOIN subscriptions s ON r.ri = s.ri "
+        "WHERE r.rn = ? OR r.ri = ?";
 
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    if (rc != SQLITE_OK)
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK)
     {
         sqlite3_close(db);
         return false;
     }
 
     sqlite3_bind_text(stmt, 1, resource_name, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, resource_name, -1, SQLITE_STATIC);
 
+    bool found = false;
     if (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        strncpy(sub->resource_id, (const char *)sqlite3_column_text(stmt, 1), sizeof(sub->resource_id) - 1);
-        strncpy(sub->resource_name, (const char *)sqlite3_column_text(stmt, 2), sizeof(sub->resource_name) - 1);
-        strncpy(sub->resource_uri, (const char *)sqlite3_column_text(stmt, 3), sizeof(sub->resource_uri) - 1);
-        strncpy(sub->notification_uris, (const char *)sqlite3_column_text(stmt, 4), sizeof(sub->notification_uris) - 1);
-        sub->notification_type = sqlite3_column_int(stmt, 5);
-        sub->event_type = sqlite3_column_int(stmt, 6);
-        strncpy(sub->content_type, (const char *)sqlite3_column_text(stmt, 7), sizeof(sub->content_type) - 1);
-        strncpy(sub->originator, (const char *)sqlite3_column_text(stmt, 8), sizeof(sub->originator) - 1);
-        strncpy(sub->creation_time, (const char *)sqlite3_column_text(stmt, 9), sizeof(sub->creation_time) - 1);
-        strncpy(sub->last_modified_time, (const char *)sqlite3_column_text(stmt, 10), sizeof(sub->last_modified_time) - 1);
-        rc = true;
-    }
-    else
-    {
-        rc = false;
+        strncpy(sub->resource_id,       (const char *)sqlite3_column_text(stmt, 0),  sizeof(sub->resource_id)       - 1);
+        strncpy(sub->resource_name,     (const char *)sqlite3_column_text(stmt, 1),  sizeof(sub->resource_name)     - 1);
+        strncpy(sub->parent_id,         (const char *)sqlite3_column_text(stmt, 2),  sizeof(sub->parent_id)         - 1);
+        strncpy(sub->creation_time,     (const char *)sqlite3_column_text(stmt, 3),  sizeof(sub->creation_time)     - 1);
+        strncpy(sub->last_modified_time,(const char *)sqlite3_column_text(stmt, 4),  sizeof(sub->last_modified_time)- 1);
+        strncpy(sub->resource_uri,      (const char *)sqlite3_column_text(stmt, 5),  sizeof(sub->resource_uri)      - 1);
+        strncpy(sub->notification_uris, (const char *)sqlite3_column_text(stmt, 6),  sizeof(sub->notification_uris) - 1);
+        sub->notification_type =         sqlite3_column_int (stmt, 7);
+        const char *et = (const char *)sqlite3_column_text(stmt, 8);
+        if (et) strncpy(sub->event_type_str, et, sizeof(sub->event_type_str) - 1);
+        const char *ct = (const char *)sqlite3_column_text(stmt, 9);
+        if (ct) strncpy(sub->content_type, ct, sizeof(sub->content_type) - 1);
+        const char *orig = (const char *)sqlite3_column_text(stmt, 10);
+        if (orig) strncpy(sub->originator, orig, sizeof(sub->originator) - 1);
+        found = true;
     }
 
     sqlite3_finalize(stmt);
     sqlite3_close(db);
-    return rc;
+    return found;
 }
 
 #ifdef ENABLE_MQTT
@@ -581,7 +587,11 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
         return;
     }
 
-    const char *sql = "SELECT * FROM subscriptions";
+    const char *sql =
+        "SELECT r.ri, r.rn, r.pi, r.ct, r.lt, "
+        "s.resource_uri, s.notification_uris, s.notification_type, "
+        "s.event_type, s.content_type, s.originator "
+        "FROM resources r JOIN subscriptions s ON r.ri = s.ri";
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) != SQLITE_OK)
     {
         printf("[ERRO] Falha ao executar a query SQL: %s\n", sqlite3_errmsg(db));
@@ -591,32 +601,30 @@ void handle_mqtt_notification(const char *resource_uri, const char *content, int
 
     int subscription_count = 0;
     int notifications_sent = 0;
-    
+
     while (sqlite3_step(stmt) == SQLITE_ROW)
     {
         subscription_count++;
         Subscription sub = {0};
-        
-        // Preencher estrutura
-        strncpy(sub.resource_id,   (const char *)sqlite3_column_text(stmt, 1), sizeof(sub.resource_id)   - 1); // ri
-        strncpy(sub.resource_name, (const char *)sqlite3_column_text(stmt, 2), sizeof(sub.resource_name) - 1); // resource_name
-        strncpy(sub.resource_uri, (const char *)sqlite3_column_text(stmt, 3), sizeof(sub.resource_uri) - 1);
-        strncpy(sub.notification_uris, (const char *)sqlite3_column_text(stmt, 4), sizeof(sub.notification_uris) - 1);
-        sub.notification_type = sqlite3_column_int(stmt, 5);
-        const char *stored_events = (const char *)sqlite3_column_text(stmt, 6);
+
+        strncpy(sub.resource_id,        (const char *)sqlite3_column_text(stmt, 0),  sizeof(sub.resource_id)        - 1);
+        strncpy(sub.resource_name,      (const char *)sqlite3_column_text(stmt, 1),  sizeof(sub.resource_name)      - 1);
+        strncpy(sub.parent_id,          (const char *)sqlite3_column_text(stmt, 2),  sizeof(sub.parent_id)          - 1);
+        strncpy(sub.creation_time,      (const char *)sqlite3_column_text(stmt, 3),  sizeof(sub.creation_time)      - 1);
+        strncpy(sub.last_modified_time, (const char *)sqlite3_column_text(stmt, 4),  sizeof(sub.last_modified_time) - 1);
+        strncpy(sub.resource_uri,       (const char *)sqlite3_column_text(stmt, 5),  sizeof(sub.resource_uri)       - 1);
+        strncpy(sub.notification_uris,  (const char *)sqlite3_column_text(stmt, 6),  sizeof(sub.notification_uris)  - 1);
+        sub.notification_type =          sqlite3_column_int (stmt, 7);
+        const char *stored_events = (const char *)sqlite3_column_text(stmt, 8);
         if (stored_events)
         {
             strncpy(sub.event_type_str, stored_events, sizeof(sub.event_type_str) - 1);
             sub.event_type_str[sizeof(sub.event_type_str) - 1] = '\0';
         }
-        else
-        {
-            sub.event_type_str[0] = '\0';
-        }
-        strncpy(sub.content_type, (const char *)sqlite3_column_text(stmt, 6), sizeof(sub.content_type) - 1);
-        strncpy(sub.originator, (const char *)sqlite3_column_text(stmt, 7), sizeof(sub.originator) - 1);
-        strncpy(sub.creation_time, (const char *)sqlite3_column_text(stmt, 8), sizeof(sub.creation_time) - 1);
-        strncpy(sub.last_modified_time, (const char *)sqlite3_column_text(stmt, 9), sizeof(sub.last_modified_time) - 1);
+        const char *ct_val = (const char *)sqlite3_column_text(stmt, 9);
+        if (ct_val) strncpy(sub.content_type, ct_val, sizeof(sub.content_type) - 1);
+        const char *orig_val = (const char *)sqlite3_column_text(stmt, 10);
+        if (orig_val) strncpy(sub.originator, orig_val, sizeof(sub.originator) - 1);
 
         // Check whether to notify
         if (!should_notify_for_event(sub.event_type_str, event_type, resource_uri, sub.resource_uri)) {
@@ -1534,36 +1542,52 @@ bool delete_subscription(const char *resource_name)
 {
     sqlite3 *db;
     sqlite3_stmt *stmt;
-    bool result = false;
 
-    int rc = sqlite3_open(DB_PATH, &db);
-    if (rc != SQLITE_OK) {
+    if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         fprintf(stderr, "Failed to open database: %s\n", sqlite3_errmsg(db));
         return false;
     }
 
-    const char *sql = "DELETE FROM subscriptions WHERE resource_name = ?";
-
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    if (rc != SQLITE_OK) {
-        fprintf(stderr, "Failed to prepare statement: %s\n", sqlite3_errmsg(db));
+    /* Resolve name or ri → ri */
+    char ri[64] = {0};
+    {
+        sqlite3_stmt *s;
+        const char *q =
+            "SELECT r.ri FROM resources r JOIN subscriptions sub ON r.ri = sub.ri "
+            "WHERE r.rn = ? OR r.ri = ? LIMIT 1";
+        if (sqlite3_prepare_v2(db, q, -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, resource_name, -1, SQLITE_STATIC);
+            sqlite3_bind_text(s, 2, resource_name, -1, SQLITE_STATIC);
+            if (sqlite3_step(s) == SQLITE_ROW) {
+                const char *r = (const char *)sqlite3_column_text(s, 0);
+                strncpy(ri, r ? r : "", sizeof(ri) - 1);
+            }
+            sqlite3_finalize(s);
+        }
+    }
+    if (ri[0] == '\0') {
         sqlite3_close(db);
         return false;
     }
 
-    rc = sqlite3_bind_text(stmt, 1, resource_name, -1, SQLITE_STATIC);
+    sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
 
-    if (sqlite3_step(stmt) == SQLITE_DONE)
-    {
-        // Check if a row was actually deleted
-        int changes = sqlite3_changes(db);
-        result = (changes > 0);
-    }
-
+    /* Delete child row first */
+    sqlite3_prepare_v2(db, "DELETE FROM subscriptions WHERE ri = ?", -1, &stmt, NULL);
+    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
 
-    return result;
+    /* Delete from resources */
+    sqlite3_prepare_v2(db, "DELETE FROM resources WHERE ri = ?", -1, &stmt, NULL);
+    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
+    int changes = sqlite3_changes(db);
+    sqlite3_finalize(stmt);
+
+    sqlite3_exec(db, "COMMIT TRANSACTION", 0, 0, 0);
+    sqlite3_close(db);
+    return changes > 0;
 }
 
 
