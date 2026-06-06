@@ -308,6 +308,4 @@ Exact install commands are in
   benign `database is locked` from the cleanup thread (see the integration doc).
 - **Committed `iotm2m.db` may be stale:** regenerate from `create_tables.sql` on a
   fresh clone so the `actions`/`schedules` tables exist.
-- **Aggressive `.gitignore`:** docs, the makefile and other files are untracked by
-  default — see [Version control & `.gitignore`](#version-control--gitignore).
 ```
