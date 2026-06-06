@@ -968,11 +968,12 @@ void check_and_trigger_actions(void)
         return;
     }
 
-    /* schedule -> its AE (by name or ri) -> containers -> actions in them */
+    /* schedule -> its AE (parent via resources) -> containers -> actions in them */
     const char *sql =
         "SELECT a.ri, s.sce, a.action_primitive, a.object_resource_id, a.input "
         "FROM schedules s "
-        "JOIN resources ae  ON (ae.rn = s.pi OR ae.ri = s.pi) "
+        "JOIN resources rs  ON rs.ri = s.ri "
+        "JOIN resources ae  ON ae.ri = rs.pi "
         "JOIN resources cnt ON cnt.pi = ae.ri "
         "JOIN resources act ON act.pi = cnt.ri AND act.ty = 65 "
         "JOIN actions   a   ON a.ri = act.ri";

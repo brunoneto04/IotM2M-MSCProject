@@ -9,45 +9,8 @@
 #include <pthread.h>
 #include <time.h>
 
-/**
- * @brief Initializes the 'schedules' table in the SQLite database.
- * 
- * This function creates the table if it does not exist. 'ri' is the primary key,
- * and 'rn' is marked as UNIQUE to prevent duplicates under the same root
- * (although ideally in oneM2M it should be unique by 'pi' and 'rn', we keep 
- * global UNIQUE simplified according to the requirements).
- */
-void init_schedule_table(void) {
-    sqlite3 *db;
-    char *err_msg = 0;
-    
-    int rc = sqlite3_open(DB_PATH, &db);
-    if (rc != SQLITE_OK) {
-        LOG_ERROR("Error: Could not open DB to initialize Schedules: %s", sqlite3_errmsg(db));
-        return;
-    }
-
-    const char *sql = 
-        "CREATE TABLE IF NOT EXISTS schedules ("
-        "ri TEXT PRIMARY KEY, "
-        "rn TEXT UNIQUE NOT NULL, "
-        "pi TEXT NOT NULL, "
-        "ct TEXT NOT NULL, "
-        "lt TEXT NOT NULL, "
-        "et TEXT, "
-        "sce TEXT NOT NULL"
-        ");";
-
-    rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
-    if (rc != SQLITE_OK) {
-        LOG_ERROR("SQL Error creating schedules table: %s", err_msg);
-        sqlite3_free(err_msg);
-    } else {
-        LOG("[DB] 'schedules' table verified/initialized successfully.");
-    }
-
-    sqlite3_close(db);
-}
+/* schedules table is created by database/create_tables.sql — no runtime DDL needed. */
+void init_schedule_table(void) { }
 
 // --- CRUD Routes (Phase 7.4) ---
 
@@ -64,12 +27,15 @@ static bool is_valid_cron_format(const char *sce) {
     return spaces >= 4;
 }
 
+/* Schedule type number in oneM2M (TS-0004 ty=29) */
+#define SCHEDULE_RESOURCE_TYPE 29
+
 void handle_schedule_create(struct response_params *params, const char *pi, const char *body) {
     char response[BUFFER_SIZE] = {0};
     json_object *root = json_tokener_parse(body);
-    
+
     if (!root) {
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\n\r\n{\"error\":\"Invalid JSON\"}");
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Invalid JSON\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         return;
     }
@@ -78,57 +44,115 @@ void handle_schedule_create(struct response_params *params, const char *pi, cons
     if (!json_object_object_get_ex(root, "m2m:sch", &sch_obj) ||
         !json_object_object_get_ex(sch_obj, "rn", &rn_obj) ||
         !json_object_object_get_ex(sch_obj, "sce", &sce_obj)) {
-        
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\n\r\n{\"error\":\"Missing mandatory fields: m2m:sch, rn or sce\"}");
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Missing mandatory fields: m2m:sch, rn or sce\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         json_object_put(root);
         return;
     }
 
-    const char *rn = json_object_get_string(rn_obj);
+    const char *rn  = json_object_get_string(rn_obj);
     const char *sce = json_object_get_string(sce_obj);
 
     if (!is_valid_cron_format(sce)) {
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\n\r\n{\"error\":\"Invalid sce cron format. Expected '* * * * *'\"}");
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Invalid sce cron format. Expected '* * * * *'\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         json_object_put(root);
         return;
     }
 
-    char *ri = generate_random_sequence(); // From common.h
-    
+    /* Resolve parent AE name → ri so pi stored in resources is always an ri. */
     sqlite3 *db;
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
-        free(ri);
         json_object_put(root);
         return;
     }
 
-    const char *sql = "INSERT INTO schedules (ri, rn, pi, ct, lt, sce) VALUES (?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'), ?)";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, rn, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 3, pi ? pi : "", -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, sce, -1, SQLITE_STATIC);
-
-    if (sqlite3_step(stmt) != SQLITE_DONE) {
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 403 Forbidden\r\n\r\n{\"error\":\"Schedule Name already exists under this parent\"}");
+    /* Look up the parent resource by rn or ri */
+    char pi_ri[64] = {0};
+    {
+        sqlite3_stmt *s;
+        const char *q = "SELECT ri FROM resources WHERE rn = ? OR ri = ? LIMIT 1";
+        if (sqlite3_prepare_v2(db, q, -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, pi ? pi : "", -1, SQLITE_STATIC);
+            sqlite3_bind_text(s, 2, pi ? pi : "", -1, SQLITE_STATIC);
+            if (sqlite3_step(s) == SQLITE_ROW) {
+                const char *r = (const char *)sqlite3_column_text(s, 0);
+                strncpy(pi_ri, r ? r : "", sizeof(pi_ri) - 1);
+            }
+            sqlite3_finalize(s);
+        }
+    }
+    if (pi_ri[0] == '\0') {
+        sqlite3_close(db);
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Parent resource not found\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
-    } else {
-        LOG("[Schedule] Created successfully with RI: %s", ri);
-        snprintf(response, BUFFER_SIZE, 
-            "HTTP/1.1 201 Created\r\n"
-            "Content-Type: application/json\r\n\r\n"
-            "{\"m2m:sch\":{\"ri\":\"%s\",\"rn\":\"%s\",\"pi\":\"%s\",\"sce\":\"%s\"}}", 
-            ri, rn, pi ? pi : "", sce);
-        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        json_object_put(root);
+        return;
     }
 
-    sqlite3_finalize(stmt);
+    char *ri = generate_random_sequence();
+    if (!ri) {
+        sqlite3_close(db);
+        json_object_put(root);
+        return;
+    }
+
+    sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
+
+    /* Insert into shared resources table */
+    sqlite3_stmt *stmt;
+    const char *sql_res =
+        "INSERT INTO resources (ty, ri, rn, pi, ct, lt) "
+        "VALUES (?, ?, ?, ?, datetime('now','localtime'), datetime('now','localtime'))";
+    int rc = SQLITE_ERROR;
+    if (sqlite3_prepare_v2(db, sql_res, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_int (stmt, 1, SCHEDULE_RESOURCE_TYPE);
+        sqlite3_bind_text(stmt, 2, ri,    -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, rn,    -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 4, pi_ri, -1, SQLITE_STATIC);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    if (rc != SQLITE_DONE) {
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
+        sqlite3_close(db);
+        free(ri);
+        json_object_put(root);
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Schedule name already exists\"}");
+        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        return;
+    }
+
+    /* Insert into schedules table (schedule-specific fields only) */
+    const char *sql_sch = "INSERT INTO schedules (ri, sce) VALUES (?, ?)";
+    rc = SQLITE_ERROR;
+    if (sqlite3_prepare_v2(db, sql_sch, -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, ri,  -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, sce, -1, SQLITE_STATIC);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+    if (rc != SQLITE_DONE) {
+        sqlite3_exec(db, "ROLLBACK TRANSACTION", 0, 0, 0);
+        sqlite3_close(db);
+        free(ri);
+        json_object_put(root);
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        return;
+    }
+
+    sqlite3_exec(db, "COMMIT TRANSACTION", 0, 0, 0);
     sqlite3_close(db);
+
+    LOG("[Schedule] Created successfully with RI: %s", ri);
+    snprintf(response, BUFFER_SIZE,
+        "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\n\r\n"
+        "{\"m2m:sch\":{\"ri\":\"%s\",\"rn\":\"%s\",\"pi\":\"%s\",\"sce\":\"%s\"}}",
+        ri, rn, pi_ri, sce);
+    if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
     free(ri);
     json_object_put(root);
 }
@@ -136,47 +160,45 @@ void handle_schedule_create(struct response_params *params, const char *pi, cons
 void handle_schedule_retrieve(struct response_params *params, const char *identifier) {
     char response[BUFFER_SIZE] = {0};
     sqlite3 *db;
-    
+
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         return;
     }
 
-    const char *sql = "SELECT ri, rn, pi, ct, lt, et, sce FROM schedules WHERE ri = ? OR rn = ?";
+    const char *sql =
+        "SELECT r.ri, r.rn, r.pi, r.ct, r.lt, s.et, s.sce "
+        "FROM resources r JOIN schedules s ON r.ri = s.ri "
+        "WHERE r.ri = ? OR r.rn = ?";
     sqlite3_stmt *stmt;
     sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
     sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
 
     if (sqlite3_step(stmt) == SQLITE_ROW) {
-        const char *ri = (const char *)sqlite3_column_text(stmt, 0);
-        const char *rn = (const char *)sqlite3_column_text(stmt, 1);
-        const char *pi = (const char *)sqlite3_column_text(stmt, 2);
-        const char *ct = (const char *)sqlite3_column_text(stmt, 3);
-        const char *lt = (const char *)sqlite3_column_text(stmt, 4);
-        const char *et = (const char *)sqlite3_column_text(stmt, 5);
+        const char *ri  = (const char *)sqlite3_column_text(stmt, 0);
+        const char *rn  = (const char *)sqlite3_column_text(stmt, 1);
+        const char *pi  = (const char *)sqlite3_column_text(stmt, 2);
+        const char *ct  = (const char *)sqlite3_column_text(stmt, 3);
+        const char *lt  = (const char *)sqlite3_column_text(stmt, 4);
+        const char *et  = (const char *)sqlite3_column_text(stmt, 5);
         const char *sce = (const char *)sqlite3_column_text(stmt, 6);
 
         json_object *resp_obj = json_object_new_object();
-        json_object *sch_obj = json_object_new_object();
-        
-        json_object_object_add(sch_obj, "ri", json_object_new_string(ri));
-        json_object_object_add(sch_obj, "rn", json_object_new_string(rn));
-        json_object_object_add(sch_obj, "pi", json_object_new_string(pi));
-        json_object_object_add(sch_obj, "ct", json_object_new_string(ct));
-        json_object_object_add(sch_obj, "lt", json_object_new_string(lt));
+        json_object *sch_obj  = json_object_new_object();
+        json_object_object_add(sch_obj, "ri",  json_object_new_string(ri));
+        json_object_object_add(sch_obj, "rn",  json_object_new_string(rn));
+        json_object_object_add(sch_obj, "pi",  json_object_new_string(pi));
+        json_object_object_add(sch_obj, "ct",  json_object_new_string(ct));
+        json_object_object_add(sch_obj, "lt",  json_object_new_string(lt));
         if (et) json_object_object_add(sch_obj, "et", json_object_new_string(et));
         json_object_object_add(sch_obj, "sce", json_object_new_string(sce));
-        
         json_object_object_add(resp_obj, "m2m:sch", sch_obj);
 
         const char *json_str = json_object_to_json_string(resp_obj);
-        snprintf(response, BUFFER_SIZE, 
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: application/json\r\n\r\n"
-            "%s", json_str);
-            
+        snprintf(response, BUFFER_SIZE,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n%s", json_str);
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         json_object_put(resp_obj);
     } else {
@@ -190,9 +212,8 @@ void handle_schedule_retrieve(struct response_params *params, const char *identi
 
 void handle_schedule_update(struct response_params *params, const char *identifier, const char *body) {
     char response[BUFFER_SIZE] = {0};
-    sqlite3 *db;
 
-    /* Look for an optional new sce in the body: {"m2m:sch":{"sce":"..."}} */
+    /* Parse optional new sce from body: {"m2m:sch":{"sce":"..."}} */
     const char *new_sce = NULL;
     json_object *root = body ? json_tokener_parse(body) : NULL;
     if (root) {
@@ -203,7 +224,6 @@ void handle_schedule_update(struct response_params *params, const char *identifi
         }
     }
 
-    /* Validate the new sce (if provided) before touching the DB. */
     if (new_sce && !is_valid_cron_format(new_sce)) {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\":\"Invalid sce cron format. Expected '* * * * *'\"}");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
@@ -211,6 +231,7 @@ void handle_schedule_update(struct response_params *params, const char *identifi
         return;
     }
 
+    sqlite3 *db;
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
@@ -218,38 +239,52 @@ void handle_schedule_update(struct response_params *params, const char *identifi
         return;
     }
 
-    /* With a valid sce, update both sce and lt; otherwise keep the old
-     * behaviour of only refreshing lt. */
-    sqlite3_stmt *stmt;
-    if (new_sce) {
-        const char *sql = "UPDATE schedules SET sce = ?, lt = datetime('now', 'localtime') WHERE ri = ? OR rn = ?";
-        sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-        sqlite3_bind_text(stmt, 1, new_sce, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 3, identifier, -1, SQLITE_STATIC);
-    } else {
-        const char *sql = "UPDATE schedules SET lt = datetime('now', 'localtime') WHERE ri = ? OR rn = ?";
-        sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-        sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_STATIC);
-        sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
+    /* Resolve identifier → ri (may be rn or ri) */
+    char ri[64] = {0};
+    {
+        sqlite3_stmt *s;
+        const char *q = "SELECT r.ri FROM resources r JOIN schedules sch ON r.ri = sch.ri WHERE r.ri = ? OR r.rn = ? LIMIT 1";
+        if (sqlite3_prepare_v2(db, q, -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, identifier, -1, SQLITE_STATIC);
+            sqlite3_bind_text(s, 2, identifier, -1, SQLITE_STATIC);
+            if (sqlite3_step(s) == SQLITE_ROW) {
+                const char *r = (const char *)sqlite3_column_text(s, 0);
+                strncpy(ri, r ? r : "", sizeof(ri) - 1);
+            }
+            sqlite3_finalize(s);
+        }
+    }
+    if (ri[0] == '\0') {
+        sqlite3_close(db);
+        if (root) json_object_put(root);
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\n\r\n");
+        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        return;
     }
 
+    sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
+
+    /* Always update lt in resources */
+    sqlite3_stmt *stmt;
+    sqlite3_prepare_v2(db, "UPDATE resources SET lt = datetime('now','localtime') WHERE ri = ?", -1, &stmt, NULL);
+    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
     sqlite3_step(stmt);
-    int changes = sqlite3_changes(db);
     sqlite3_finalize(stmt);
+
+    /* Update sce in schedules if provided */
+    if (new_sce) {
+        sqlite3_prepare_v2(db, "UPDATE schedules SET sce = ? WHERE ri = ?", -1, &stmt, NULL);
+        sqlite3_bind_text(stmt, 1, new_sce, -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, ri,      -1, SQLITE_STATIC);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    sqlite3_exec(db, "COMMIT TRANSACTION", 0, 0, 0);
     sqlite3_close(db);
 
-    if (changes > 0) {
-        LOG("[Schedule] Updated successfully: %s", identifier);
-        if (new_sce) {
-            snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated sce and lt successfully\"}");
-        } else {
-            snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated lt successfully\"}");
-        }
-    } else {
-        snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\n\r\n");
-    }
-
+    LOG("[Schedule] Updated successfully: %s", identifier);
+    snprintf(response, BUFFER_SIZE, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"message\":\"Updated successfully\"}");
     if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
     if (root) json_object_put(root);
 }
@@ -257,22 +292,52 @@ void handle_schedule_update(struct response_params *params, const char *identifi
 void handle_schedule_delete(struct response_params *params, const char *identifier) {
     char response[BUFFER_SIZE] = {0};
     sqlite3 *db;
-    
+
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
         if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
         return;
     }
 
-    const char *sql = "DELETE FROM schedules WHERE ri = ? OR rn = ?";
-    sqlite3_stmt *stmt;
-    sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    sqlite3_bind_text(stmt, 1, identifier, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, identifier, -1, SQLITE_STATIC);
+    /* Resolve identifier → ri */
+    char ri[64] = {0};
+    {
+        sqlite3_stmt *s;
+        const char *q = "SELECT r.ri FROM resources r JOIN schedules sch ON r.ri = sch.ri WHERE r.ri = ? OR r.rn = ? LIMIT 1";
+        if (sqlite3_prepare_v2(db, q, -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, identifier, -1, SQLITE_STATIC);
+            sqlite3_bind_text(s, 2, identifier, -1, SQLITE_STATIC);
+            if (sqlite3_step(s) == SQLITE_ROW) {
+                const char *r = (const char *)sqlite3_column_text(s, 0);
+                strncpy(ri, r ? r : "", sizeof(ri) - 1);
+            }
+            sqlite3_finalize(s);
+        }
+    }
+    if (ri[0] == '\0') {
+        sqlite3_close(db);
+        snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\n\r\n");
+        if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
+        return;
+    }
 
+    sqlite3_exec(db, "BEGIN TRANSACTION", 0, 0, 0);
+
+    sqlite3_stmt *stmt;
+    /* Delete child row first (FK child before parent) */
+    sqlite3_prepare_v2(db, "DELETE FROM schedules WHERE ri = ?", -1, &stmt, NULL);
+    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    /* Delete from resources */
+    sqlite3_prepare_v2(db, "DELETE FROM resources WHERE ri = ?", -1, &stmt, NULL);
+    sqlite3_bind_text(stmt, 1, ri, -1, SQLITE_STATIC);
     sqlite3_step(stmt);
     int changes = sqlite3_changes(db);
     sqlite3_finalize(stmt);
+
+    sqlite3_exec(db, "COMMIT TRANSACTION", 0, 0, 0);
     sqlite3_close(db);
 
     if (changes > 0) {
@@ -281,7 +346,6 @@ void handle_schedule_delete(struct response_params *params, const char *identifi
     } else {
         snprintf(response, BUFFER_SIZE, "HTTP/1.1 404 Not Found\r\n\r\n");
     }
-    
     if (params->protocol && strcmp(params->protocol, "HTTP") == 0) write(params->http_socket, response, strlen(response));
 }
 

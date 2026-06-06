@@ -125,3 +125,11 @@ CREATE TABLE actions
     PRIMARY KEY (ri),
     FOREIGN KEY (ri) REFERENCES resources (ri)
 );
+CREATE TABLE schedules
+(
+    ri  TEXT NOT NULL UNIQUE,
+    et  DATETIME,
+    sce TEXT NOT NULL,
+    PRIMARY KEY (ri),
+    FOREIGN KEY (ri) REFERENCES resources (ri)
+);

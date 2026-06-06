@@ -12,13 +12,13 @@
  * resource scheduling, often interacting with Actions.
  */
 typedef struct {
-    char *ri;   // Resource ID (Unique identifier)
-    char *rn;   // Resource Name (Readable name of the resource)
-    char *pi;   // Parent ID (ID of the parent resource)
-    char *ct;   // Creation Time
-    char *lt;   // Last Modified Time
-    char *et;   // Expiration Time
-    char *sce;  // Schedule Element (Scheduling pattern, e.g., cron)
+    char *ri;   // Resource ID — FK to resources.ri
+    char *rn;   // Resource Name — from resources.rn
+    char *pi;   // Parent ID — from resources.pi
+    char *ct;   // Creation Time — from resources.ct
+    char *lt;   // Last Modified Time — from resources.lt
+    char *et;   // Expiration Time — stored in schedules.et
+    char *sce;  // Schedule Element (cron pattern) — stored in schedules.sce
 } Schedule;
 
 void init_schedule_table(void);
